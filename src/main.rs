@@ -1,5 +1,6 @@
 mod auth;
 mod config;
+mod log;
 mod request;
 
 use eventsource_stream::Eventsource;
@@ -19,7 +20,6 @@ use tokio::sync::Mutex;
 static CONFIG: LazyLock<Mutex<config::Config>> =
     LazyLock::new(|| Mutex::new(config::load_config()));
 
-#[instrument]
 async fn handle_openai(
     mut req_body: converter::models::openai::Request,
 ) -> Result<impl warp::Reply, Infallible> {
@@ -113,8 +113,12 @@ async fn handle_openai(
 
 #[instrument]
 async fn handle_claude(
-    mut req_body: converter::models::claude::Request,
+    body: warp::hyper::body::Bytes,
+    // mut req_body: converter::models::claude::Request,
 ) -> Result<impl warp::Reply, Infallible> {
+    let raw = &String::from_utf8(body.to_vec()).unwrap();
+    info!(claude.request = raw);
+    let mut req_body: converter::models::claude::Request = serde_json::from_slice(&body).unwrap();
     let mut config = CONFIG.lock().await;
     let mut extension = HashMap::new();
     let project_id = config
@@ -134,7 +138,9 @@ async fn handle_claude(
         req_body.model = "gemini-2.5-flash".to_string();
     }
     let openai_req: converter::models::openai::Request = req_body.into();
+    info!(openai.request = serde_json::to_string(&openai_req).unwrap());
     let gemini_req: converter::models::gemini::Request = openai_req.into();
+    info!(gemini.request = serde_json::to_string(&gemini_req).unwrap());
     let token = auth::gemini::token(&mut config).await.unwrap();
     let ak = token.access_token;
     let resp = request::gemini::gemini_request(gemini_req, &ak).await;
@@ -211,7 +217,6 @@ async fn handle_claude(
     Ok(reply)
 }
 
-#[instrument]
 async fn handle_gemini(
     _req_body: converter::models::gemini::Request,
 ) -> Result<impl warp::Reply, Infallible> {
@@ -220,9 +225,7 @@ async fn handle_gemini(
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .init();
+    log::init_log();
 
     let _config = config::load_config();
 
@@ -232,7 +235,7 @@ async fn main() {
         .and_then(handle_openai);
     let claude = warp::path!("v1" / "messages")
         .and(warp::post())
-        .and(warp::body::json())
+        .and(warp::body::bytes())
         .and_then(handle_claude);
     let gemini = warp::path!("v1internal:streamGenerateContent")
         .and(warp::post())

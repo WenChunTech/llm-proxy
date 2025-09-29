@@ -10,7 +10,12 @@ members = ["./converter"]
 reqwest = { version = "0.12.23", features = ["json", "stream"] }
 tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread", "sync"] }
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20" }
+tracing-subscriber = { version = "0.3.20", features = [
+    "fmt",
+    "env-filter",
+    "time",
+    "registry",
+] }
 warp = { version = "0.4.2", features = ["server"] }
 converter = { path = "./converter" }
 oauth2 = { version = "5.0.0" }
@@ -23,3 +28,4 @@ eventsource-stream = "0.2.3"
 futures = "0.3.31"
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
 tokio-stream = "0.1.17"
+tracing-appender = "0.2"

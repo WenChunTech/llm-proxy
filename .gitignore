@@ -2,5 +2,6 @@
 config.local.json
 token.json
 env.sh
-running.log
 a.json
+*.log
+logs
