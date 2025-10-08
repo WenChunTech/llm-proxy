@@ -1,7 +1,10 @@
 /target
-config.local.json
-token.json
 env.sh
-a.json
+![config].json
+*.json
 *.log
+*.txt
+*.js
+*.py
 logs
+req

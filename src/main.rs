@@ -12,7 +12,6 @@ use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 use tracing::error;
 use tracing::info;
-use tracing::instrument;
 use warp::{Filter, Reply, http::StatusCode, sse::Event};
 
 use tokio::sync::Mutex;
@@ -45,8 +44,10 @@ async fn handle_openai(
     let reply = match resp {
         Ok(resp) => {
             if !resp.status().is_success() {
+                let msg = resp.text().await.unwrap_or_default();
+                error!(gemini.response = msg);
                 return Ok(warp::reply::with_status(
-                    warp::reply::html(resp.text().await.unwrap_or_default()),
+                    warp::reply::html(msg),
                     StatusCode::INTERNAL_SERVER_ERROR,
                 )
                 .into_response());
@@ -58,6 +59,7 @@ async fn handle_openai(
                         if event.data == "[DONE]" {
                             Event::default().data("[DONE]")
                         } else {
+                            info!(openai.request = event.data);
                             match serde_json::from_str::<converter::models::gemini::Response>(
                                 &event.data,
                             ) {
@@ -66,12 +68,15 @@ async fn handle_openai(
                                         "stream".to_string(),
                                         serde_json::Value::Bool(true),
                                     );
-                                    info!("gemini response: {}", event.data);
+                                    info!(
+                                        gemini.response =
+                                            serde_json::to_string(&data).unwrap_or_default()
+                                    );
                                     let openai_resp: converter::models::openai::Response =
                                         data.into();
                                     match serde_json::to_string(&openai_resp) {
                                         Ok(openai_resp_str) => {
-                                            info!("openai response: {}", openai_resp_str);
+                                            info!(openai.response = openai_resp_str);
                                             Event::default().data(openai_resp_str)
                                         }
                                         Err(e) => {
@@ -111,7 +116,6 @@ async fn handle_openai(
     Ok(reply)
 }
 
-#[instrument]
 async fn handle_claude(
     body: warp::hyper::body::Bytes,
     // mut req_body: converter::models::claude::Request,
@@ -133,6 +137,7 @@ async fn handle_claude(
         "project_id".to_string(),
         serde_json::Value::String(project_id),
     );
+    extension.insert("chat_id".to_string(), serde_json::Value::Null);
     req_body.extension = extension;
     if req_body.model == "claude-3-5-haiku-20241022" {
         req_body.model = "gemini-2.5-flash".to_string();
