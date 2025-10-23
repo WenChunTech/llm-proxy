@@ -8,3 +8,4 @@ env.sh
 *.py
 logs
 req
+converter-wasm

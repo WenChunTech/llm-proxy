@@ -63,7 +63,7 @@ pub fn init_log() {
     // 2. Setup console layer for ERROR level
     let console_layer = fmt::layer()
         .with_writer(std::io::stderr)
-        .with_filter(LevelFilter::ERROR);
+        .with_filter(LevelFilter::INFO);
 
     // 3. Setup file layer for INFO level
     let filename = format!("{}.log", get_formatted_timestamp(SystemTime::now()));
