@@ -1,7 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    path::PathBuf,
+    io::ErrorKind,
+    path::{Path, PathBuf},
 };
 
 use serde::{Deserialize, Serialize};
@@ -9,6 +10,8 @@ use serde_json::Value;
 use tracing_subscriber::EnvFilter;
 
 use crate::{error::ProxyError, provider::types::ProviderType};
+
+const DEFAULT_CONFIG_PATH: &str = "config.json";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -370,17 +373,26 @@ impl ProviderGroups {
 }
 
 pub fn load_config() -> Result<LoadedConfig, ProxyError> {
-    let (config, source_path) = if let Some(path) = cli_config_path() {
-        let config = read_config_file(path.clone())?;
-        (config, Some(path))
-    } else if let Ok(raw) =
-        std::env::var("APP_CONFIG_JSON").or_else(|_| std::env::var("APP_CONFIG"))
-    {
+    load_config_from_sources(ConfigSources {
+        cli_path: cli_config_path(),
+        env_json: env_config_json(),
+        default_path: PathBuf::from(DEFAULT_CONFIG_PATH),
+    })
+}
+
+fn load_config_from_sources(sources: ConfigSources) -> Result<LoadedConfig, ProxyError> {
+    let (config, source_path) = if let Some(path) = sources.cli_path {
+        match read_optional_config_file(&path)? {
+            Some(config) => (config, Some(path)),
+            None => (Config::default(), Some(path)),
+        }
+    } else if let Some(raw) = sources.env_json {
         (parse_config_json(&raw)?, None)
-    } else if let Ok(raw) = fs::read_to_string("config.json") {
-        (parse_config_json(&raw)?, Some(PathBuf::from("config.json")))
     } else {
-        (Config::default(), Some(PathBuf::from("config.json")))
+        match read_optional_config_file(&sources.default_path)? {
+            Some(config) => (config, Some(sources.default_path)),
+            None => (Config::default(), Some(sources.default_path)),
+        }
     };
 
     validate_config(&config)?;
@@ -388,6 +400,12 @@ pub fn load_config() -> Result<LoadedConfig, ProxyError> {
         config,
         source_path,
     })
+}
+
+struct ConfigSources {
+    cli_path: Option<PathBuf>,
+    env_json: Option<String>,
+    default_path: PathBuf,
 }
 
 pub fn validate_config(config: &Config) -> Result<(), ProxyError> {
@@ -426,9 +444,17 @@ fn cli_config_path() -> Option<PathBuf> {
     None
 }
 
-fn read_config_file(path: PathBuf) -> Result<Config, ProxyError> {
-    let raw = fs::read_to_string(path)?;
-    parse_config_json(&raw)
+fn env_config_json() -> Option<String> {
+    std::env::var("APP_CONFIG").ok()
+}
+
+fn read_optional_config_file(path: &Path) -> Result<Option<Config>, ProxyError> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    parse_config_json(&raw).map(Some)
 }
 
 #[cfg(test)]
@@ -492,6 +518,47 @@ mod tests {
 
         let error = validate_config(&config).unwrap_err();
         assert!(error.to_string().contains("invalid log_level"));
+    }
+
+    #[test]
+    fn missing_default_config_uses_default_and_keeps_writable_path() {
+        let default_path = missing_test_path("default");
+        let loaded = load_config_from_sources(ConfigSources {
+            cli_path: None,
+            env_json: None,
+            default_path: default_path.clone(),
+        })
+        .unwrap();
+
+        assert_eq!(loaded.config.port, Config::default().port);
+        assert_eq!(loaded.source_path.as_deref(), Some(default_path.as_path()));
+    }
+
+    #[test]
+    fn missing_cli_config_uses_default_and_keeps_cli_path() {
+        let cli_path = missing_test_path("cli");
+        let loaded = load_config_from_sources(ConfigSources {
+            cli_path: Some(cli_path.clone()),
+            env_json: None,
+            default_path: PathBuf::from("config.json"),
+        })
+        .unwrap();
+
+        assert_eq!(loaded.config.port, Config::default().port);
+        assert_eq!(loaded.source_path.as_deref(), Some(cli_path.as_path()));
+    }
+
+    #[test]
+    fn env_config_remains_memory_only() {
+        let loaded = load_config_from_sources(ConfigSources {
+            cli_path: None,
+            env_json: Some(r#"{"port": 8765}"#.to_string()),
+            default_path: PathBuf::from("config.json"),
+        })
+        .unwrap();
+
+        assert_eq!(loaded.config.port, 8765);
+        assert!(loaded.source_path.is_none());
     }
 
     #[test]
@@ -611,5 +678,15 @@ mod tests {
 
         assert_eq!(config.model_priority[0], "gemini_cli");
         assert_eq!(config.providers.openai_chat.len(), 1);
+    }
+
+    fn missing_test_path(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!("llm-proxy-{name}-{}-{nanos}", std::process::id()))
+            .join("config.json")
     }
 }

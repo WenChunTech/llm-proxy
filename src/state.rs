@@ -108,6 +108,9 @@ impl AppState {
             .config_path
             .clone()
             .ok_or_else(|| ProxyError::Config("config was loaded from environment".to_string()))?;
+        if let Some(parent) = path.parent().filter(|path| !path.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)?;
+        }
         std::fs::write(&path, format!("{raw}\n"))?;
         let config = Arc::new(config);
         inner.registry = ProviderRegistry::new(config.clone());
@@ -191,5 +194,51 @@ fn auth_cache_key(key: &AuthCursorKey, auth_index: usize) -> AuthCacheKey {
         provider_type: key.provider_type,
         config_index: key.config_index,
         auth_index,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use crate::config::{Config, LoadedConfig};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn update_config_creates_missing_config_file_and_updates_runtime_state() {
+        let path = unique_config_path("update-config-creates-missing-file");
+        let parent = path.parent().unwrap().to_path_buf();
+        let state = AppState::from_loaded(LoadedConfig {
+            config: Config::default(),
+            source_path: Some(path.clone()),
+        })
+        .unwrap();
+        let next = Config {
+            port: 4567,
+            api_key: Some("proxy-key".to_string()),
+            ..Default::default()
+        };
+
+        state.update_config(next).await.unwrap();
+
+        let saved: Config = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let snapshot = state.snapshot().await;
+        assert_eq!(saved.port, 4567);
+        assert_eq!(saved.api_key.as_deref(), Some("proxy-key"));
+        assert_eq!(snapshot.config.port, 4567);
+        assert_eq!(snapshot.config.api_key.as_deref(), Some("proxy-key"));
+
+        let _ = fs::remove_dir_all(parent);
+    }
+
+    fn unique_config_path(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!("llm-proxy-{name}-{}-{nanos}", std::process::id()))
+            .join("config.json")
     }
 }

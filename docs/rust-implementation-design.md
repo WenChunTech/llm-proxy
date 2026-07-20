@@ -977,10 +977,9 @@ HTTP 映射：
 
 加载顺序：
 
-1. `APP_CONFIG_JSON`
-2. `APP_CONFIG`
-3. `config.json`
-4. empty config
+1. `APP_CONFIG`
+2. `config.json`
+3. empty config
 
 Node 版本地优先读 `config.json`，部署优先 env/Redis。Rust 首版可以更简单，但应文档化顺序。
 
