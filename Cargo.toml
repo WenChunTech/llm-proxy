@@ -3,29 +3,19 @@ name = "llm-proxy"
 version = "0.1.0"
 edition = "2024"
 
-[workspace]
-members = ["./converter", "converter-wasm"]
-
 [dependencies]
-reqwest = { version = "0.12.23", features = ["json", "stream"] }
-tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread", "sync"] }
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = [
-    "fmt",
-    "env-filter",
-    "time",
-    "registry",
-] }
-warp = { version = "0.4.2", features = ["server"] }
-converter = { path = "./converter" }
-oauth2 = { version = "5.0.0" }
-serde = { version = "1.0.227", features = ["derive"] }
-serde_json = "1.0.145"
-thiserror = "2.0.16"
-url = "2.5.7"
-anyhow = "1.0.100"
-eventsource-stream = "0.2.3"
-futures = "0.3.31"
-uuid = { version = "1.18.1", features = ["v4", "serde"] }
-tokio-stream = "0.1.17"
-tracing-appender = "0.2"
+base64 = "0.22.1"
+bytes = "1.12.1"
+config = "0.15.25"
+converter = { git = "ssh://git@github.com/WenChunTech/converter.git", branch = "master" }
+futures-util = "0.3.32"
+mime_guess = "2.0.5"
+reqwest = { version = "0.13.4", features = ["json", "stream", "rustls", "form"] }
+rust-embed = "8.12.0"
+salvo = { version = "0.95.0", features = ["sse", "cors", "timeout", "logging"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+thiserror = "2.0.18"
+tokio = { version = "1.52.4", features = ["macros", "rt-multi-thread", "signal"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }

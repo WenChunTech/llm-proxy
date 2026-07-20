@@ -1,11 +1,43 @@
-/target
+/target/
+/logs/
+/req/
+/llm-proxy
+
+# Local environment and secrets.
+.env
+.env.*
+!.env.example
 env.sh
-![config].json
-*.json
+config.json
+config.*.json
+!config.example.json
+
+# Frontend dependencies and build outputs.
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.playwright-cli/
+/frontend/.vite/
+node_modules/
+dist/
+dist-ssr/
+
+# Local tooling and editor files.
+/.playwright-cli/
+/.vscode/
+.idea/
+.DS_Store
 *.log
-*.txt
-*.js
-*.py
-logs
-req
-converter-wasm
+*.local
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local/private checkouts.
+/converter/
+/converter-wasm/
+
+# Miscellaneous local files.
+img.html
+img.json

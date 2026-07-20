@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: llm-proxy-linux-x86_64
+            binary: llm-proxy
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: llm-proxy-macos-x86_64
+            binary: llm-proxy
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: llm-proxy-windows-x86_64
+            binary: llm-proxy.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH for private Cargo dependencies
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.CONVERTER_DEPLOY_KEY }}
+
+      - name: Trust GitHub SSH host key
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+        working-directory: frontend
+
+      - name: Build
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: cargo build --release --locked --target ${{ matrix.target }} --package llm-proxy
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/${{ matrix.binary }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.binary }}
+          if-no-files-found: error

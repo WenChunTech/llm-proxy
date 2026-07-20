@@ -1,0 +1,239 @@
+use converter::models::{claude, gemini, gemini_cli, openai};
+use serde_json::Value;
+
+use crate::{error::ProxyError, provider::types::ProviderType};
+
+const SUPPORTED_PROTOCOL_CONVERSIONS: &[(ProviderType, ProviderType)] = &[
+    (ProviderType::Chat, ProviderType::Responses),
+    (ProviderType::Chat, ProviderType::Claude),
+    (ProviderType::Chat, ProviderType::Gemini),
+    (ProviderType::Responses, ProviderType::Chat),
+    (ProviderType::Responses, ProviderType::Claude),
+    (ProviderType::Responses, ProviderType::Gemini),
+    (ProviderType::Claude, ProviderType::Chat),
+    (ProviderType::Claude, ProviderType::Responses),
+    (ProviderType::Claude, ProviderType::Gemini),
+    (ProviderType::Gemini, ProviderType::Chat),
+    (ProviderType::Gemini, ProviderType::Responses),
+    (ProviderType::Gemini, ProviderType::Claude),
+];
+
+pub fn convert_request(
+    body: Value,
+    source: ProviderType,
+    target: ProviderType,
+) -> Result<Value, ProxyError> {
+    if source == target {
+        return Ok(body);
+    }
+    ensure_supported(source, target, ConversionKind::Request)?;
+
+    match (source, target) {
+        (ProviderType::Chat, ProviderType::Responses) => {
+            map::<openai::chat::Request, openai::responses::Request>(body)
+        }
+        (ProviderType::Chat, ProviderType::Claude) => {
+            map::<openai::chat::Request, claude::Request>(body)
+        }
+        (ProviderType::Chat, ProviderType::Gemini) => {
+            let req: openai::chat::Request = serde_json::from_value(body)?;
+            let cli: gemini_cli::Request = req.into();
+            let gemini: gemini::Request = cli.into();
+            Ok(serde_json::to_value(gemini)?)
+        }
+        (ProviderType::Responses, ProviderType::Chat) => {
+            map::<openai::responses::Request, openai::chat::Request>(body)
+        }
+        (ProviderType::Responses, ProviderType::Claude) => {
+            map::<openai::responses::Request, claude::Request>(body)
+        }
+        (ProviderType::Responses, ProviderType::Gemini) => {
+            let req: openai::responses::Request = serde_json::from_value(body)?;
+            let cli: gemini_cli::Request = req.into();
+            let gemini: gemini::Request = cli.into();
+            Ok(serde_json::to_value(gemini)?)
+        }
+        (ProviderType::Claude, ProviderType::Chat) => {
+            map::<claude::Request, openai::chat::Request>(body)
+        }
+        (ProviderType::Claude, ProviderType::Responses) => {
+            map::<claude::Request, openai::responses::Request>(body)
+        }
+        (ProviderType::Claude, ProviderType::Gemini) => {
+            let req: claude::Request = serde_json::from_value(body)?;
+            let cli: gemini_cli::Request = req.into();
+            let gemini: gemini::Request = cli.into();
+            Ok(serde_json::to_value(gemini)?)
+        }
+        (ProviderType::Gemini, ProviderType::Chat) => {
+            let req: gemini::Request = serde_json::from_value(body)?;
+            let cli: gemini_cli::Request = req.into();
+            let out: openai::chat::Request = cli.into();
+            Ok(serde_json::to_value(out)?)
+        }
+        (ProviderType::Gemini, ProviderType::Responses) => {
+            let req: gemini::Request = serde_json::from_value(body)?;
+            let cli: gemini_cli::Request = req.into();
+            let out: openai::responses::Request = cli.into();
+            Ok(serde_json::to_value(out)?)
+        }
+        (ProviderType::Gemini, ProviderType::Claude) => {
+            let req: gemini::Request = serde_json::from_value(body)?;
+            let cli: gemini_cli::Request = req.into();
+            let out: claude::Request = cli.into();
+            Ok(serde_json::to_value(out)?)
+        }
+        _ => unreachable!("supported request conversion is not implemented"),
+    }
+}
+
+pub fn convert_response(
+    body: Value,
+    source: ProviderType,
+    target: ProviderType,
+) -> Result<Value, ProxyError> {
+    if source == target {
+        return Ok(body);
+    }
+    ensure_supported(source, target, ConversionKind::Response)?;
+
+    match (source, target) {
+        (ProviderType::Chat, ProviderType::Responses) => {
+            map::<openai::chat::Response, openai::responses::Response>(body)
+        }
+        (ProviderType::Chat, ProviderType::Claude) => {
+            map::<openai::chat::Response, claude::Response>(body)
+        }
+        (ProviderType::Chat, ProviderType::Gemini) => {
+            let resp: openai::chat::Response = serde_json::from_value(body)?;
+            let cli: gemini_cli::Response = resp.into();
+            let gemini: gemini::Response = cli.into();
+            Ok(serde_json::to_value(gemini)?)
+        }
+        (ProviderType::Responses, ProviderType::Chat) => {
+            map::<openai::responses::Response, openai::chat::Response>(body)
+        }
+        (ProviderType::Responses, ProviderType::Claude) => {
+            map::<openai::responses::Response, claude::Response>(body)
+        }
+        (ProviderType::Responses, ProviderType::Gemini) => {
+            let resp: openai::responses::Response = serde_json::from_value(body)?;
+            let cli: gemini_cli::Response = resp.into();
+            let gemini: gemini::Response = cli.into();
+            Ok(serde_json::to_value(gemini)?)
+        }
+        (ProviderType::Claude, ProviderType::Chat) => {
+            map::<claude::Response, openai::chat::Response>(body)
+        }
+        (ProviderType::Claude, ProviderType::Responses) => {
+            map::<claude::Response, openai::responses::Response>(body)
+        }
+        (ProviderType::Claude, ProviderType::Gemini) => {
+            let resp: claude::Response = serde_json::from_value(body)?;
+            let cli: gemini_cli::Response = resp.into();
+            let gemini: gemini::Response = cli.into();
+            Ok(serde_json::to_value(gemini)?)
+        }
+        (ProviderType::Gemini, ProviderType::Chat) => {
+            let resp: gemini::Response = serde_json::from_value(body)?;
+            let cli: gemini_cli::Response = resp.into();
+            let out: openai::chat::Response = cli.into();
+            Ok(serde_json::to_value(out)?)
+        }
+        (ProviderType::Gemini, ProviderType::Responses) => {
+            let resp: gemini::Response = serde_json::from_value(body)?;
+            let cli: gemini_cli::Response = resp.into();
+            let out: openai::responses::Response = cli.into();
+            Ok(serde_json::to_value(out)?)
+        }
+        (ProviderType::Gemini, ProviderType::Claude) => {
+            let resp: gemini::Response = serde_json::from_value(body)?;
+            let cli: gemini_cli::Response = resp.into();
+            let out: claude::Response = cli.into();
+            Ok(serde_json::to_value(out)?)
+        }
+        _ => unreachable!("supported response conversion is not implemented"),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ConversionKind {
+    Request,
+    Response,
+}
+
+fn ensure_supported(
+    source: ProviderType,
+    target: ProviderType,
+    kind: ConversionKind,
+) -> Result<(), ProxyError> {
+    if SUPPORTED_PROTOCOL_CONVERSIONS.contains(&(source, target)) {
+        return Ok(());
+    }
+
+    let message = format!(
+        "unsupported {} conversion: {source:?} -> {target:?}",
+        kind.as_str()
+    );
+    match kind {
+        ConversionKind::Request => Err(ProxyError::RequestConversion(message)),
+        ConversionKind::Response => Err(ProxyError::ResponseConversion(message)),
+    }
+}
+
+impl ConversionKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Request => "request",
+            Self::Response => "response",
+        }
+    }
+}
+
+fn map<I, O>(body: Value) -> Result<Value, ProxyError>
+where
+    I: serde::de::DeserializeOwned,
+    O: From<I> + serde::Serialize,
+{
+    let input: I = serde_json::from_value(body)?;
+    Ok(serde_json::to_value(O::from(input))?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protocol_conversion_matrix_covers_all_non_identity_core_pairs() {
+        let protocols = [
+            ProviderType::Chat,
+            ProviderType::Responses,
+            ProviderType::Claude,
+            ProviderType::Gemini,
+        ];
+
+        for source in protocols {
+            for target in protocols {
+                if source == target {
+                    continue;
+                }
+                assert!(
+                    SUPPORTED_PROTOCOL_CONVERSIONS.contains(&(source, target)),
+                    "missing conversion matrix entry: {source:?} -> {target:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn protocol_conversion_matrix_excludes_provider_aliases() {
+        assert!(
+            !SUPPORTED_PROTOCOL_CONVERSIONS
+                .iter()
+                .any(
+                    |(source, target)| matches!(source, ProviderType::Codex | ProviderType::Grok)
+                        || matches!(target, ProviderType::Codex | ProviderType::Grok)
+                )
+        );
+    }
+}
