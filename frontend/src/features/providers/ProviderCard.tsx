@@ -11,19 +11,33 @@ type ProviderAuthStats = {
 
 export function ProviderCard({
   provider,
+  priorityIndex = 0,
+  priorityTotal = 1,
+  isDragging = false,
   onToggle,
   onEdit,
   onCopy,
   onDelete,
+  onMove,
+  onDragStart,
+  onDragEnd,
+  onDrop,
   authStats,
   authTargets,
   onValidateAuth,
 }: {
   provider: Provider
+  priorityIndex?: number
+  priorityTotal?: number
+  isDragging?: boolean
   onToggle: (id: string) => void
   onEdit: (provider: Provider) => void
   onCopy: (provider: Provider) => void
   onDelete: (id: string) => void
+  onMove?: (direction: -1 | 1) => void
+  onDragStart?: () => void
+  onDragEnd?: () => void
+  onDrop?: () => void
   authStats?: ProviderAuthStats
   authTargets?: AuthValidationTarget[]
   onValidateAuth?: (kind: AuthProviderKind, targets: AuthValidationTarget[]) => void
@@ -31,8 +45,61 @@ export function ProviderCard({
   const meta = providerMeta[provider.kind]
   const effectiveBaseUrl = effectiveBaseUrlForProvider(provider)
   const canValidateAuth = Boolean(onValidateAuth && authTargets?.length && (provider.kind === 'codex' || provider.kind === 'grok'))
+  const canReorder = Boolean(onMove && priorityTotal > 1)
   return (
-    <article className={`provider-card ${provider.enabled ? '' : 'is-disabled'}`}>
+    <article
+      className={`provider-card ${provider.enabled ? '' : 'is-disabled'} ${isDragging ? 'is-dragging' : ''} ${canReorder ? 'is-reorderable' : ''}`}
+      draggable={canReorder}
+      onDragStart={(event) => {
+        if (!canReorder) return
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData('text/plain', provider.id)
+        onDragStart?.()
+      }}
+      onDragOver={(event) => {
+        if (!canReorder) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+      }}
+      onDrop={(event) => {
+        if (!canReorder) return
+        event.preventDefault()
+        onDrop?.()
+      }}
+      onDragEnd={() => onDragEnd?.()}
+    >
+      <div className="provider-card-priority">
+        <button
+          className="priority-drag-handle"
+          type="button"
+          title={canReorder ? `拖动调整 ${provider.name} 优先级` : '仅一条配置时无需排序'}
+          aria-label={canReorder ? `拖动调整 ${provider.name} 优先级` : '仅一条配置时无需排序'}
+          disabled={!canReorder}
+        >
+          <Icon name="grip" size={15} />
+        </button>
+        <span className="priority-number">{String(priorityIndex + 1).padStart(2, '0')}</span>
+        <div className="priority-actions provider-card-priority-actions">
+          <button
+            className="icon-button subtle"
+            type="button"
+            title="提高优先级"
+            disabled={!canReorder || priorityIndex === 0}
+            onClick={() => onMove?.(-1)}
+          >
+            <Icon name="arrowUp" size={15} />
+          </button>
+          <button
+            className="icon-button subtle"
+            type="button"
+            title="降低优先级"
+            disabled={!canReorder || priorityIndex >= priorityTotal - 1}
+            onClick={() => onMove?.(1)}
+          >
+            <Icon name="arrowDown" size={15} />
+          </button>
+        </div>
+      </div>
       <div className="provider-card-main">
         <div className={`provider-avatar large ${provider.kind === 'grok' ? 'grok-avatar' : ''}`} style={{ backgroundColor: meta.color }}>{providerMarkText(provider.kind)}</div>
         <div className="provider-card-copy">
@@ -55,8 +122,7 @@ export function ProviderCard({
       <div className="provider-models">
         <span className="section-label">MODELS <b>{provider.models.length}</b></span>
         <div className="chip-list">
-          {provider.models.slice(0, 4).map((model) => <span className="model-chip" key={model}>{model}</span>)}
-          {provider.models.length > 4 && <span className="model-chip more-chip">+{provider.models.length - 4}</span>}
+          {provider.models.map((model) => <span className="model-chip" key={model}>{model}</span>)}
           {!provider.models.length && <span className="muted-copy">尚未添加模型</span>}
         </div>
       </div>

@@ -1,6 +1,7 @@
 {
   "port": 3000,
   "api_key": "replace-with-your-proxy-api-key",
+  "log_level": "info",
   "model_priority": [
     "openai_chat",
     "openai_responses",

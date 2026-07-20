@@ -704,7 +704,7 @@ async fn probe_validation_auth(
         "stream": true,
     });
     let mut builder = client
-        .post(endpoint)
+        .post(&endpoint)
         .bearer_auth(token)
         .header("content-type", "application/json")
         .header("accept", "text/event-stream")
@@ -740,12 +740,26 @@ async fn probe_validation_auth(
             let body = response.text().await.unwrap_or_default();
             classify_validation_response(provider_type, status_code, &body)
         }
-        Err(error) => AuthValidationProbe {
-            valid: false,
-            reason: "network_error".to_string(),
-            status_code: 0,
-            error_message: error.to_string(),
-        },
+        Err(error) => {
+            let status_code = error.status().map(|status| status.as_u16()).unwrap_or(0);
+            let upstream_url = error
+                .url()
+                .map(|url| url.as_str().to_string())
+                .unwrap_or(endpoint);
+            tracing::warn!(
+                provider = ?provider_type,
+                status_code,
+                upstream_url = %upstream_url,
+                error = %error,
+                "auth validation request failed"
+            );
+            AuthValidationProbe {
+                valid: false,
+                reason: "network_error".to_string(),
+                status_code,
+                error_message: error.to_string(),
+            }
+        }
     }
 }
 

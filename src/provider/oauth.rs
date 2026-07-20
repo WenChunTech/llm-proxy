@@ -185,16 +185,23 @@ fn select_auth<T>(
 where
     T: AuthEnabled + Clone,
 {
-    let accounts = auth.enabled_items();
+    let accounts = auth.enabled_items_with_indices();
     if accounts.is_empty() {
         return Err(ProxyError::Config(format!(
             "No enabled {provider_name} accounts available"
         )));
     }
-    let start = start_index.unwrap_or_default() % accounts.len();
+    let start = start_index
+        .and_then(|index| {
+            accounts
+                .iter()
+                .position(|(candidate, _)| *candidate == index)
+        })
+        .unwrap_or_default();
     let offset = target_attempt.saturating_sub(1);
     let idx = (start + offset) % accounts.len();
-    Ok((idx, accounts[idx].clone()))
+    let (auth_index, auth) = accounts[idx];
+    Ok((auth_index, (*auth).clone()))
 }
 
 async fn refresh_codex_token(
@@ -531,7 +538,7 @@ mod tests {
         assert_eq!(selected.access_token.as_deref(), Some("first"));
 
         let (idx, selected) = select_codex_auth(&auth, None, 2).unwrap();
-        assert_eq!(idx, 1);
+        assert_eq!(idx, 2);
         assert_eq!(selected.access_token.as_deref(), Some("second"));
     }
 

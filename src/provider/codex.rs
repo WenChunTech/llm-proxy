@@ -41,8 +41,8 @@ impl CodexProvider {
     ) -> Result<UpstreamResponse, ProxyError> {
         let api_key = request.config.base.api_key.trim();
         let api_key = (!api_key.is_empty()).then_some(api_key);
+        let provider_base_url = request.config.base.base_url.trim();
         let (token, account_id, base_url, auth_index) = if let Some(api_key) = api_key {
-            let provider_base_url = request.config.base.base_url.trim();
             (
                 api_key.to_string(),
                 None,
@@ -61,10 +61,11 @@ impl CodexProvider {
             )?;
             let auth_key = AuthCursorKey {
                 provider_type: ProviderType::Codex,
+                base_url: provider_base_url.trim_end_matches('/').to_string(),
                 config_index: request.config_index,
             };
             if let Some(state) = request.state
-                && let Some(cached_auth) = state.cached_codex_auth(auth_key, auth_index).await
+                && let Some(cached_auth) = state.cached_codex_auth(&auth_key, auth_index).await
             {
                 auth = cached_auth;
             }
@@ -73,10 +74,9 @@ impl CodexProvider {
                 && let Some(state) = request.state
             {
                 state
-                    .record_codex_auth(auth_key, auth_index, auth.clone())
+                    .record_codex_auth(&auth_key, auth_index, auth.clone())
                     .await;
             }
-            let provider_base_url = request.config.base.base_url.trim();
             let base_url = codex_oauth_base_url(
                 (!provider_base_url.is_empty()).then_some(provider_base_url),
                 &auth,

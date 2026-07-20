@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use crate::{
-    config::{CodexAuth, Config, GrokAuth, load_config, validate_config},
+    config::{CodexAuth, Config, GrokAuth, validate_config},
     error::ProxyError,
     provider::{Providers, registry::ProviderRegistry, types::ProviderType},
 };
@@ -28,15 +28,17 @@ pub struct AppSnapshot {
     pub registry: ProviderRegistry,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProviderCursor {
     pub provider_type: ProviderType,
+    pub base_url: String,
     pub config_index: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AuthCursorKey {
     pub provider_type: ProviderType,
+    pub base_url: String,
     pub config_index: usize,
 }
 
@@ -60,8 +62,7 @@ struct RuntimeAuthCache {
 }
 
 impl AppState {
-    pub fn load() -> Result<Self, ProxyError> {
-        let loaded = load_config()?;
+    pub fn from_loaded(loaded: crate::config::LoadedConfig) -> Result<Self, ProxyError> {
         let config = Arc::new(loaded.config);
         let registry = ProviderRegistry::new(config.clone());
         let http = reqwest::Client::builder().build()?;
@@ -69,6 +70,7 @@ impl AppState {
             config_source = config_source(loaded.source_path.as_ref()),
             port = config.port,
             bind = %config.bind_addr(),
+            log_level = config.log_level.as_deref().unwrap_or("info"),
             provider_configs = config.providers.iter_configs().len(),
             configured_models = registry.configured_models().len(),
             "configuration loaded"
@@ -110,12 +112,12 @@ impl AppState {
         let config = Arc::new(config);
         inner.registry = ProviderRegistry::new(config.clone());
         inner.config = config;
-        self.cursors.write().await.clear();
         self.auth_cache.write().await.clear();
         tracing::info!(
             config_path = %path.display(),
             port = inner.config.port,
             bind = %inner.config.bind_addr(),
+            log_level = inner.config.log_level.as_deref().unwrap_or("info"),
             provider_configs = inner.config.providers.iter_configs().len(),
             configured_models = inner.registry.configured_models().len(),
             "configuration updated"
@@ -124,7 +126,7 @@ impl AppState {
     }
 
     pub async fn provider_cursor(&self, model: &str) -> Option<ProviderCursor> {
-        self.cursors.read().await.providers.get(model).copied()
+        self.cursors.read().await.providers.get(model).cloned()
     }
 
     pub async fn record_provider_success(&self, model: &str, cursor: ProviderCursor) {
@@ -135,75 +137,46 @@ impl AppState {
             .insert(model.to_string(), cursor);
     }
 
-    pub async fn clear_provider_cursor(&self, model: &str) {
-        self.cursors.write().await.providers.remove(model);
-    }
-
-    pub async fn auth_cursor(&self, key: AuthCursorKey) -> Option<usize> {
-        self.cursors.read().await.auth.get(&key).copied()
+    pub async fn auth_cursor(&self, key: &AuthCursorKey) -> Option<usize> {
+        self.cursors.read().await.auth.get(key).copied()
     }
 
     pub async fn record_auth_success(&self, key: AuthCursorKey, auth_index: usize) {
         self.cursors.write().await.auth.insert(key, auth_index);
     }
 
-    pub async fn clear_auth_cursor(&self, key: AuthCursorKey) {
-        self.cursors.write().await.auth.remove(&key);
-    }
-
     pub async fn cached_codex_auth(
         &self,
-        key: AuthCursorKey,
+        key: &AuthCursorKey,
         auth_index: usize,
     ) -> Option<CodexAuth> {
-        self.auth_cache
-            .read()
-            .await
-            .codex
-            .get(&auth_cache_key(key, auth_index))
-            .cloned()
+        let cache_key = auth_cache_key(key, auth_index);
+        self.auth_cache.read().await.codex.get(&cache_key).cloned()
     }
 
-    pub async fn record_codex_auth(&self, key: AuthCursorKey, auth_index: usize, auth: CodexAuth) {
-        self.auth_cache
-            .write()
-            .await
-            .codex
-            .insert(auth_cache_key(key, auth_index), auth);
+    pub async fn record_codex_auth(&self, key: &AuthCursorKey, auth_index: usize, auth: CodexAuth) {
+        let cache_key = auth_cache_key(key, auth_index);
+        self.auth_cache.write().await.codex.insert(cache_key, auth);
     }
 
     pub async fn cached_grok_auth(
         &self,
-        key: AuthCursorKey,
+        key: &AuthCursorKey,
         auth_index: usize,
     ) -> Option<GrokAuth> {
-        self.auth_cache
-            .read()
-            .await
-            .grok
-            .get(&auth_cache_key(key, auth_index))
-            .cloned()
+        let cache_key = auth_cache_key(key, auth_index);
+        self.auth_cache.read().await.grok.get(&cache_key).cloned()
     }
 
-    pub async fn record_grok_auth(&self, key: AuthCursorKey, auth_index: usize, auth: GrokAuth) {
-        self.auth_cache
-            .write()
-            .await
-            .grok
-            .insert(auth_cache_key(key, auth_index), auth);
+    pub async fn record_grok_auth(&self, key: &AuthCursorKey, auth_index: usize, auth: GrokAuth) {
+        let cache_key = auth_cache_key(key, auth_index);
+        self.auth_cache.write().await.grok.insert(cache_key, auth);
     }
 }
 
 fn config_source(path: Option<&PathBuf>) -> String {
     path.map(|path| path.display().to_string())
         .unwrap_or_else(|| "environment".to_string())
-}
-
-impl SuccessCursors {
-    fn clear(&mut self) {
-        self.providers.clear();
-        self.auth.clear();
-    }
 }
 
 impl RuntimeAuthCache {
@@ -213,7 +186,7 @@ impl RuntimeAuthCache {
     }
 }
 
-fn auth_cache_key(key: AuthCursorKey, auth_index: usize) -> AuthCacheKey {
+fn auth_cache_key(key: &AuthCursorKey, auth_index: usize) -> AuthCacheKey {
     AuthCacheKey {
         provider_type: key.provider_type,
         config_index: key.config_index,

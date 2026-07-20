@@ -45,6 +45,27 @@ export function toApiProviderDraft(provider: ProviderDraft): ApiProvider {
   }
 }
 
+export function dedupeProvidersForSave(providers: Provider[]) {
+  const seen = new Set<string>()
+  return providers.filter((provider) => {
+    const key = providerDedupeKey(provider)
+    if (!key) return true
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function providerDedupeKey(provider: Provider) {
+  if (provider.kind === 'codex' || provider.kind === 'grok') {
+    const apiKey = provider.apiKey.trim()
+    return apiKey ? `${provider.kind}:api_key:${apiKey}` : ''
+  }
+
+  const baseUrl = provider.baseUrl.trim()
+  return baseUrl ? `${provider.kind}:base_url:${baseUrl}` : ''
+}
+
 export function buildConfigExport(
   providers: Provider[],
   priority: ProviderKind[],

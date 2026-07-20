@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { providerMeta, providerMarkText, effectiveBaseUrlForProvider, defaultPriority } from '../../config/providers'
 import type {
@@ -29,6 +30,8 @@ export function ProvidersView({
   onCopy,
   onDelete,
   onAdd,
+  onMoveProvider,
+  onReorderProvider,
   onValidateAuths,
   validatingAuthKind,
   authValidation,
@@ -53,6 +56,8 @@ export function ProvidersView({
   onCopy: (provider: Provider) => void
   onDelete: (id: string) => void
   onAdd: () => void
+  onMoveProvider: (id: string, direction: -1 | 1) => void
+  onReorderProvider: (sourceId: string, targetId: string) => void
   onValidateAuths: (kind: AuthProviderKind, targets?: AuthValidationTarget[]) => void
   validatingAuthKind: ProviderKind | null
   authValidation: AuthValidationState | null
@@ -65,6 +70,7 @@ export function ProvidersView({
   onDisableAuthResult: (kind: AuthProviderKind, target: AuthValidationTarget, disabled: boolean) => void
   onDeleteAuthResult: (kind: AuthProviderKind, target: AuthValidationTarget) => void
 }) {
+  const [draggedProviderId, setDraggedProviderId] = useState<string | null>(null)
   const visibleProviders = providers.filter((provider) => {
     const matchesFilter = filter === 'all' || provider.enabled
     const matchesKind = kindFilter === 'all' || provider.kind === kindFilter
@@ -82,6 +88,7 @@ export function ProvidersView({
     ? buildAuthValidationLookup(authValidation.payload.results)
     : new Map<string, AuthValidationState['payload']['results']>()
   const providerKindIndices = buildProviderKindIndexMap(providers)
+  const providerOrder = buildProviderOrderMap(providers)
 
   return (
     <>
@@ -144,14 +151,24 @@ export function ProvidersView({
                 </div>
               </div>
               <div className="provider-group-list">
-                {groupProviders.map((provider) => (
+                {groupProviders.map((provider, index) => (
                   <ProviderCard
                     key={provider.id}
                     provider={provider}
+                    priorityIndex={providerOrder.get(provider.id)?.index ?? index}
+                    priorityTotal={providerOrder.get(provider.id)?.total ?? groupProviders.length}
+                    isDragging={draggedProviderId === provider.id}
                     onToggle={onToggle}
                     onEdit={onEdit}
                     onCopy={onCopy}
                     onDelete={onDelete}
+                    onMove={(direction) => onMoveProvider(provider.id, direction)}
+                    onDragStart={() => setDraggedProviderId(provider.id)}
+                    onDragEnd={() => setDraggedProviderId(null)}
+                    onDrop={() => {
+                      if (draggedProviderId) onReorderProvider(draggedProviderId, provider.id)
+                      setDraggedProviderId(null)
+                    }}
                     authStats={providerAuthStats(provider, providerKindIndices.get(provider.id) ?? -1, authValidation, authValidationByProvider)}
                     authTargets={providerAuthTargets(provider, providerKindIndices.get(provider.id) ?? -1)}
                     onValidateAuth={onValidateAuths}
@@ -252,6 +269,21 @@ function buildProviderKindIndexMap(providers: Provider[]) {
     seen[kind] = index + 1
   }
   return indices
+}
+
+function buildProviderOrderMap(providers: Provider[]) {
+  const grouped = new Map<ProviderKind, Provider[]>()
+  for (const provider of providers) {
+    grouped.set(provider.kind, [...(grouped.get(provider.kind) ?? []), provider])
+  }
+
+  const order = new Map<string, { index: number; total: number }>()
+  for (const group of grouped.values()) {
+    for (const [index, provider] of group.entries()) {
+      order.set(provider.id, { index, total: group.length })
+    }
+  }
+  return order
 }
 
 function providerAuthTargets(provider: Provider, providerIndex: number) {

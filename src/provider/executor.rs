@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use bytes::Bytes;
 use serde_json::Value;
@@ -127,7 +127,7 @@ pub async fn execute_image(
             retry_budget += 1;
             let attempt = retry_budget;
             let provider_cursor = provider_cursor(target);
-            let target_attempt = target_attempts.entry(provider_cursor).or_insert(0);
+            let target_attempt = target_attempts.entry(provider_cursor.clone()).or_insert(0);
             *target_attempt += 1;
             tracing::info!(
                 model = %request.model,
@@ -155,7 +155,7 @@ pub async fn execute_image(
                         provider_index = target.provider_index,
                         config_index = target.config_index,
                         base_url = config_base_url(&target.config),
-                        status = result.response.status(),
+                        status_code = result.response.status(),
                         response_body = %result.response.body_text().unwrap_or_default(),
                         "image provider returned non-success"
                     );
@@ -165,6 +165,9 @@ pub async fn execute_image(
                     tracing::warn!(
                         model = %request.model,
                         provider = ?target.provider_type,
+                        provider_index = target.provider_index,
+                        config_index = target.config_index,
+                        base_url = config_base_url(&target.config),
                         error = %error,
                         "image provider attempt failed"
                     );
@@ -187,8 +190,6 @@ pub async fn execute_image(
         sleep(Duration::from_millis(delay_ms)).await;
     }
 
-    state.clear_provider_cursor(&request.model).await;
-
     if let Some(result) = last_result {
         return Ok(result);
     }
@@ -210,7 +211,6 @@ async fn execute_single_model(
     rotate_attempt_targets(&mut targets, state.provider_cursor(model).await);
     let mut last_result = None;
     let mut target_attempts: HashMap<ProviderCursor, usize> = HashMap::new();
-    let mut attempted_auth_keys: HashSet<AuthCursorKey> = HashSet::new();
 
     loop {
         let mut found_valid_provider = false;
@@ -223,12 +223,11 @@ async fn execute_single_model(
             *retry_budget += 1;
             let attempt = *retry_budget;
             let provider_cursor = provider_cursor(target);
-            let target_attempt = target_attempts.entry(provider_cursor).or_insert(0);
+            let target_attempt = target_attempts.entry(provider_cursor.clone()).or_insert(0);
             *target_attempt += 1;
             let target_attempt = *target_attempt;
             let auth_key = auth_cursor_key(target);
-            let auth_start_index = if let Some(key) = auth_key {
-                attempted_auth_keys.insert(key);
+            let auth_start_index = if let Some(key) = auth_key.as_ref() {
                 state.auth_cursor(key).await
             } else {
                 None
@@ -271,7 +270,7 @@ async fn execute_single_model(
                         provider_index = target.provider_index,
                         config_index = target.config_index,
                         base_url = config_base_url(&target.config),
-                        status = result.response.status(),
+                        status_code = result.response.status(),
                         response_body = %result.response.body_text().unwrap_or_default(),
                         "provider returned non-success"
                     );
@@ -281,6 +280,9 @@ async fn execute_single_model(
                     tracing::warn!(
                         model = %model,
                         provider = ?target.provider_type,
+                        provider_index = target.provider_index,
+                        config_index = target.config_index,
+                        base_url = config_base_url(&target.config),
                         error = %error,
                         "provider attempt failed"
                     );
@@ -301,11 +303,6 @@ async fn execute_single_model(
             "retry backoff"
         );
         sleep(Duration::from_millis(delay_ms)).await;
-    }
-
-    state.clear_provider_cursor(model).await;
-    for key in attempted_auth_keys {
-        state.clear_auth_cursor(key).await;
     }
 
     Ok(last_result)
@@ -374,12 +371,17 @@ async fn try_target(
         })
         .await
         .map_err(|error| {
+            let upstream_status_code = error.upstream_status_code().map(|status| status.as_u16());
+            let upstream_url = error.upstream_url();
             tracing::warn!(
                 model = %model,
                 provider = ?target.provider_type,
                 provider_index = target.provider_index,
                 config_index = target.config_index,
                 base_url = config_base_url(&target.config),
+                status_code = error.status_code().as_u16(),
+                upstream_status_code = ?upstream_status_code,
+                upstream_url = upstream_url.as_deref().unwrap_or(""),
                 error = %error,
                 "upstream request failed"
             );
@@ -411,6 +413,7 @@ fn rotate_attempt_targets(targets: &mut [AttemptTarget], cursor: Option<Provider
 fn provider_cursor(target: &AttemptTarget) -> ProviderCursor {
     ProviderCursor {
         provider_type: target.provider_type,
+        base_url: target.base_url(),
         config_index: target.config_index,
     }
 }
@@ -422,6 +425,7 @@ fn auth_cursor_key(target: &AttemptTarget) -> Option<AuthCursorKey> {
     )
     .then_some(AuthCursorKey {
         provider_type: target.provider_type,
+        base_url: target.base_url(),
         config_index: target.config_index,
     })
 }
@@ -467,12 +471,16 @@ async fn try_image_target(
         .send()
         .await
         .map_err(|error| {
+            let upstream_status_code = error.status().map(|status| status.as_u16());
+            let upstream_url = error.url().map(|url| url.as_str().to_string());
             tracing::warn!(
                 model = %request.model,
                 provider = ?target.provider_type,
                 provider_index = target.provider_index,
                 config_index = target.config_index,
                 base_url = %config.base_url,
+                upstream_status_code = ?upstream_status_code,
+                upstream_url = upstream_url.as_deref().unwrap_or(""),
                 error = %error,
                 "image upstream request failed"
             );
@@ -483,7 +491,7 @@ async fn try_image_target(
         tracing::debug!(
             provider = ?target.provider_type,
             model = %request.model,
-            status,
+            status_code = status,
             raw_response_body = %String::from_utf8_lossy(body),
             "image upstream raw response body"
         );
@@ -544,15 +552,16 @@ mod tests {
     #[test]
     fn rotate_attempt_targets_starts_with_provider_cursor() {
         let mut targets = vec![
-            target(ProviderType::Chat, 0),
-            target(ProviderType::Chat, 1),
-            target(ProviderType::Responses, 0),
+            target_with_base_url(ProviderType::Chat, 0, "https://first.example/v1"),
+            target_with_base_url(ProviderType::Chat, 1, "https://second.example/v1"),
+            target_with_base_url(ProviderType::Responses, 0, "https://responses.example/v1"),
         ];
 
         rotate_attempt_targets(
             &mut targets,
             Some(ProviderCursor {
                 provider_type: ProviderType::Chat,
+                base_url: "https://second.example/v1".to_string(),
                 config_index: 1,
             }),
         );
@@ -578,6 +587,7 @@ mod tests {
             &mut targets,
             Some(ProviderCursor {
                 provider_type: ProviderType::Claude,
+                base_url: "https://claude.example/v1".to_string(),
                 config_index: 0,
             }),
         );
@@ -585,6 +595,28 @@ mod tests {
         assert_eq!(
             target_order(&targets),
             vec![(ProviderType::Chat, 0), (ProviderType::Responses, 0)]
+        );
+    }
+
+    #[test]
+    fn rotate_attempt_targets_requires_matching_base_url() {
+        let mut targets = vec![
+            target_with_base_url(ProviderType::Chat, 0, "https://first.example/v1"),
+            target_with_base_url(ProviderType::Chat, 1, "https://second.example/v1"),
+        ];
+
+        rotate_attempt_targets(
+            &mut targets,
+            Some(ProviderCursor {
+                provider_type: ProviderType::Chat,
+                base_url: "https://other.example/v1".to_string(),
+                config_index: 1,
+            }),
+        );
+
+        assert_eq!(
+            target_order(&targets),
+            vec![(ProviderType::Chat, 0), (ProviderType::Chat, 1)]
         );
     }
 
@@ -639,10 +671,18 @@ mod tests {
     }
 
     fn target(provider_type: ProviderType, config_index: usize) -> AttemptTarget {
+        target_with_base_url(provider_type, config_index, "https://openai.example/v1")
+    }
+
+    fn target_with_base_url(
+        provider_type: ProviderType,
+        config_index: usize,
+        base_url: &str,
+    ) -> AttemptTarget {
         let base = BaseProviderConfig {
             enabled: true,
             models: vec!["m".to_string()],
-            base_url: "https://openai.example/v1".to_string(),
+            base_url: base_url.to_string(),
             api_key: "key".to_string(),
         };
         let config = match provider_type {

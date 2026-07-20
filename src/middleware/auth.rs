@@ -35,13 +35,15 @@ pub async fn auth(req: &mut Request, depot: &mut Depot, res: &mut Response, ctrl
         return;
     }
 
+    let error = crate::error::ProxyError::Unauthorized;
+    let status_code = error.status_code();
     tracing::warn!(
         method = %req.method(),
         path = %req.uri().path(),
+        status_code = status_code.as_u16(),
         "unauthorized request"
     );
-    let error = crate::error::ProxyError::Unauthorized;
-    res.status_code(error.status_code());
+    res.status_code(status_code);
     res.render(Json(error.error_body()));
 }
 

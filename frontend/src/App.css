@@ -993,7 +993,7 @@ code {
 
 .provider-card {
   display: grid;
-  grid-template-columns: minmax(260px, 1.15fr) minmax(230px, 1fr) auto;
+  grid-template-columns: auto minmax(260px, 1.15fr) minmax(230px, 1fr) auto;
   align-items: center;
   gap: 22px;
   min-height: 119px;
@@ -1002,6 +1002,21 @@ code {
 
 .provider-card.is-disabled {
   opacity: 0.68;
+}
+
+.provider-card.is-dragging {
+  opacity: 0.45;
+}
+
+.provider-card-priority {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: 0 0 auto;
+}
+
+.provider-card-priority-actions {
+  gap: 2px;
 }
 
 .provider-card-main {
@@ -1138,12 +1153,6 @@ code {
   background: #fafcfd;
 }
 
-.more-chip {
-  color: var(--teal);
-  border-color: #d6eee9;
-  background: #f1faf8;
-}
-
 .muted-copy {
   color: #acb5bc;
   font-size: 10px;
@@ -1154,6 +1163,14 @@ code {
   align-items: center;
   gap: 3px;
   justify-content: flex-end;
+}
+
+.provider-card.is-reorderable {
+  cursor: grab;
+}
+
+.provider-card.is-reorderable:active {
+  cursor: grabbing;
 }
 
 .toggle {
@@ -2393,7 +2410,7 @@ code {
   }
 
   .provider-card {
-    grid-template-columns: minmax(230px, 1fr) minmax(180px, 1fr) auto;
+    grid-template-columns: auto minmax(230px, 1fr) minmax(180px, 1fr) auto;
     gap: 14px;
   }
 }
@@ -2604,6 +2621,10 @@ code {
   .provider-card {
     display: block;
     padding: 17px;
+  }
+
+  .provider-card-priority {
+    margin-bottom: 12px;
   }
 
   .provider-group-heading {

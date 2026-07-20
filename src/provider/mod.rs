@@ -102,12 +102,22 @@ impl Providers {
             Ok(upstream) => {
                 log_upstream_response_body(upstream, request.provider_type, request.model)
             }
-            Err(error) => tracing::warn!(
-                provider = ?request.provider_type,
-                model = %request.model,
-                error = %error,
-                "provider request failed"
-            ),
+            Err(error) => {
+                let upstream_status_code =
+                    error.upstream_status_code().map(|status| status.as_u16());
+                let upstream_url = error.upstream_url();
+                tracing::warn!(
+                    provider = ?request.provider_type,
+                    model = %request.model,
+                    config_index = request.config_index,
+                    base_url = request.config.base_url().unwrap_or("<provider default>"),
+                    status_code = error.status_code().as_u16(),
+                    upstream_status_code = ?upstream_status_code,
+                    upstream_url = upstream_url.as_deref().unwrap_or(""),
+                    error = %error,
+                    "provider request failed"
+                );
+            }
         }
 
         response
@@ -237,7 +247,7 @@ fn log_upstream_response_body(
             tracing::debug!(
                 provider = ?provider_type,
                 model = %model,
-                status,
+                status_code = status,
                 raw_response_body = %raw_response_body,
                 "upstream raw response body"
             );
@@ -245,7 +255,7 @@ fn log_upstream_response_body(
             tracing::warn!(
                 provider = ?provider_type,
                 model = %model,
-                status,
+                status_code = status,
                 raw_response_body = %raw_response_body,
                 "upstream request returned non-success response body"
             );

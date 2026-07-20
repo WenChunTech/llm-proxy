@@ -30,6 +30,7 @@ import {
 import { downloadJson } from './lib/browser'
 import {
   buildConfigExport,
+  dedupeProvidersForSave,
   fromApiProvider,
   providersFromImport,
   toApiProvider,
@@ -166,11 +167,15 @@ function App() {
       retry?: RetryConfig
       apiKey?: string
     }) => {
-      const nextProviders = next.providers ?? providers
+      const sourceProviders = next.providers ?? providers
+      const nextProviders = dedupeProvidersForSave(sourceProviders)
       const nextPriority = next.priority ?? priority
       const nextFallbacks = next.fallbacks ?? fallbacks
       const nextRetry = next.retry ?? retry
       const nextApiKey = next.apiKey ?? projectApiKey
+      if (nextProviders.length !== sourceProviders.length) {
+        setProviders(nextProviders)
+      }
       setIsSaving(true)
       try {
         const response = await fetch('/api/config', {
@@ -320,6 +325,40 @@ function App() {
 
   function deleteProvider(id: string) {
     const nextProviders = providers.filter((item) => item.id !== id)
+    setProviders(nextProviders)
+    void persistConfig({ providers: nextProviders })
+  }
+
+  function moveProviderConfig(id: string, direction: -1 | 1) {
+    const provider = providers.find((item) => item.id === id)
+    if (!provider) return
+    const kindProviders = providers.filter((item) => item.kind === provider.kind)
+    const index = kindProviders.findIndex((item) => item.id === id)
+    if (index < 0) return
+    const target = kindProviders[index + direction]
+    if (!target) return
+    reorderProviderConfig(id, target.id)
+  }
+
+  function reorderProviderConfig(sourceId: string, targetId: string) {
+    if (!sourceId || !targetId || sourceId === targetId) return
+    const source = providers.find((item) => item.id === sourceId)
+    const target = providers.find((item) => item.id === targetId)
+    if (!source || !target || source.kind !== target.kind) return
+
+    const kindProviders = providers.filter((item) => item.kind === source.kind)
+    const sourceIndex = kindProviders.findIndex((item) => item.id === sourceId)
+    const targetIndex = kindProviders.findIndex((item) => item.id === targetId)
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return
+
+    const reordered = [...kindProviders]
+    const [moved] = reordered.splice(sourceIndex, 1)
+    reordered.splice(targetIndex, 0, moved)
+
+    let cursor = 0
+    const nextProviders = providers.map((item) =>
+      item.kind === source.kind ? reordered[cursor++] : item,
+    )
     setProviders(nextProviders)
     void persistConfig({ providers: nextProviders })
   }
@@ -719,6 +758,8 @@ function App() {
               onEdit={openEditor}
               onCopy={copyProvider}
               onDelete={deleteProvider}
+              onMoveProvider={moveProviderConfig}
+              onReorderProvider={reorderProviderConfig}
               onAdd={() => openEditor(undefined, providerKindFilter === 'all' ? undefined : providerKindFilter)}
               onValidateAuths={validateAuthTargets}
               validatingAuthKind={validatingAuthKind}

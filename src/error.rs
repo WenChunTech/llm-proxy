@@ -48,6 +48,20 @@ impl ProxyError {
         }
     }
 
+    pub fn upstream_status_code(&self) -> Option<StatusCode> {
+        match self {
+            Self::Http(error) => error.status(),
+            _ => None,
+        }
+    }
+
+    pub fn upstream_url(&self) -> Option<String> {
+        match self {
+            Self::Http(error) => error.url().map(|url| url.as_str().to_string()),
+            _ => None,
+        }
+    }
+
     pub fn error_body(&self) -> serde_json::Value {
         let (message, code) = match self {
             Self::ModelNotConfigured { model, .. } => (

@@ -133,7 +133,16 @@ pub(crate) fn apply_headers(res: &mut Response, headers: &crate::provider::types
 }
 
 pub(crate) fn render_error(res: &mut Response, error: ProxyError) {
-    tracing::warn!(error = %error, "request failed");
-    res.status_code(error.status_code());
+    let status_code = error.status_code();
+    let upstream_status_code = error.upstream_status_code().map(|status| status.as_u16());
+    let upstream_url = error.upstream_url();
+    tracing::warn!(
+        error = %error,
+        status_code = status_code.as_u16(),
+        upstream_status_code = ?upstream_status_code,
+        upstream_url = upstream_url.as_deref().unwrap_or(""),
+        "request failed"
+    );
+    res.status_code(status_code);
     res.render(Json(error.error_body()));
 }

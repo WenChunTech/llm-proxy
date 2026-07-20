@@ -6,6 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing_subscriber::EnvFilter;
 
 use crate::{error::ProxyError, provider::types::ProviderType};
 
@@ -14,6 +15,7 @@ use crate::{error::ProxyError, provider::types::ProviderType};
 pub struct Config {
     pub port: u16,
     pub api_key: Option<String>,
+    pub log_level: Option<String>,
     pub model_priority: Vec<String>,
     pub fallback_models: Vec<String>,
     pub providers: ProviderGroups,
@@ -27,6 +29,7 @@ impl Default for Config {
         Self {
             port: 3000,
             api_key: None,
+            log_level: None,
             model_priority: Vec::new(),
             fallback_models: Vec::new(),
             providers: ProviderGroups::default(),
@@ -159,7 +162,7 @@ impl<T> Default for OneOrMany<T> {
 }
 
 impl<T> OneOrMany<T> {
-    pub fn enabled_items(&self) -> Vec<&T>
+    pub fn enabled_items_with_indices(&self) -> Vec<(usize, &T)>
     where
         T: AuthEnabled,
     {
@@ -168,10 +171,14 @@ impl<T> OneOrMany<T> {
                 if item.disabled() {
                     Vec::new()
                 } else {
-                    vec![item]
+                    vec![(0, item)]
                 }
             }
-            Self::Many(items) => items.iter().filter(|item| !item.disabled()).collect(),
+            Self::Many(items) => items
+                .iter()
+                .enumerate()
+                .filter_map(|(index, item)| (!item.disabled()).then_some((index, item)))
+                .collect(),
         }
     }
 }
@@ -371,10 +378,7 @@ pub fn load_config() -> Result<LoadedConfig, ProxyError> {
     {
         (parse_config_json(&raw)?, None)
     } else if let Ok(raw) = fs::read_to_string("config.json") {
-        (
-            parse_config_json(&raw)?,
-            Some(PathBuf::from("config.json")),
-        )
+        (parse_config_json(&raw)?, Some(PathBuf::from("config.json")))
     } else {
         (Config::default(), Some(PathBuf::from("config.json")))
     };
@@ -394,6 +398,17 @@ pub fn validate_config(config: &Config) -> Result<(), ProxyError> {
                 "duplicate fallback model: {model}"
             )));
         }
+    }
+
+    if let Some(log_level) = config
+        .log_level
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        EnvFilter::try_new(log_level).map_err(|error| {
+            ProxyError::Config(format!("invalid log_level '{log_level}': {error}"))
+        })?;
     }
     Ok(())
 }
@@ -455,6 +470,28 @@ mod tests {
 
         assert_eq!(config.port, 4000);
         assert!(!config.extra.contains_key("server"));
+    }
+
+    #[test]
+    fn log_level_config_is_read_directly() {
+        let config = parse_config_value(json!({
+            "log_level": "debug"
+        }))
+        .unwrap();
+
+        assert_eq!(config.log_level.as_deref(), Some("debug"));
+        validate_config(&config).unwrap();
+    }
+
+    #[test]
+    fn invalid_log_level_is_rejected() {
+        let config = Config {
+            log_level: Some("llm_proxy=verbose".to_string()),
+            ..Default::default()
+        };
+
+        let error = validate_config(&config).unwrap_err();
+        assert!(error.to_string().contains("invalid log_level"));
     }
 
     #[test]

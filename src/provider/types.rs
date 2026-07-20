@@ -82,4 +82,13 @@ pub struct AttemptTarget {
     pub config: crate::config::ProviderConfig,
 }
 
+impl AttemptTarget {
+    pub fn base_url(&self) -> String {
+        self.config
+            .base_url()
+            .map(|base_url| base_url.trim_end_matches('/').to_string())
+            .unwrap_or_default()
+    }
+}
+
 pub type HeaderMap = std::collections::HashMap<String, String>;
