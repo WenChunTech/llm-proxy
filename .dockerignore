@@ -1,6 +1,14 @@
 .git
 .gitignore
-.dockerignore
+.github
+.vscode
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
 target/
 llm-proxy
@@ -21,20 +29,16 @@ config.*.json
 converter/
 converter-wasm/
 
-frontend/node_modules/
-frontend/dist/
-frontend/.playwright-cli/
-frontend/.vite/
+frontend/
 node_modules/
 dist/
 dist-ssr/
 
 .playwright-cli/
-.vscode/
-.idea/
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+
+# Keep docker/llm-proxy for image packaging; ignore other local junk under docker/
+docker/*
+!docker/llm-proxy
+
+# Integration tests are not needed in the image build.
+tests/

@@ -32,6 +32,7 @@ import {
   buildConfigExport,
   dedupeProvidersForSave,
   fromApiProvider,
+  modelAliasesFromImport,
   providersFromImport,
   toApiProvider,
 } from './lib/configImportExport'
@@ -63,6 +64,7 @@ function App() {
   const [providers, setProviders] = useState<Provider[]>([])
   const [priority, setPriority] = useState<ProviderKind[]>(defaultPriority)
   const [fallbacks, setFallbacks] = useState<string[]>([])
+  const [modelAliases, setModelAliases] = useState<Record<string, string>>({})
   const [retry, setRetry] = useState<RetryConfig>({
     maxRetries: 5,
     backoffStepMs: 5000,
@@ -88,14 +90,20 @@ function App() {
   const [validatingAuthKind, setValidatingAuthKind] = useState<ProviderKind | null>(null)
   const [authValidation, setAuthValidation] = useState<AuthValidationState | null>(null)
   const configExport = useMemo(
-    () => buildConfigExport(providers, priority, fallbacks, retry, projectApiKey, port),
-    [fallbacks, port, priority, projectApiKey, providers, retry],
+    () => buildConfigExport(providers, priority, fallbacks, modelAliases, retry, projectApiKey, port),
+    [fallbacks, modelAliases, port, priority, projectApiKey, providers, retry],
   )
 
   const applyPayload = useCallback((payload: DashboardPayload) => {
     setProviders(payload.providers.map(fromApiProvider))
     setPriority(normalizePriority(payload.model_priority))
     setFallbacks(payload.fallback_models)
+    setModelAliases(
+      normalizeModelAliases(
+        payload.model_aliases,
+        payload.providers.flatMap((item) => item.models),
+      ),
+    )
     setProjectApiKey(payload.api_key ?? '')
     setPort(typeof payload.port === 'number' && payload.port > 0 ? payload.port : 3000)
     setRetry({
@@ -164,6 +172,7 @@ function App() {
       providers?: Provider[]
       priority?: ProviderKind[]
       fallbacks?: string[]
+      modelAliases?: Record<string, string>
       retry?: RetryConfig
       apiKey?: string
     }) => {
@@ -171,6 +180,8 @@ function App() {
       const nextProviders = dedupeProvidersForSave(sourceProviders)
       const nextPriority = next.priority ?? priority
       const nextFallbacks = next.fallbacks ?? fallbacks
+      const configuredModels = new Set(nextProviders.flatMap((provider) => provider.models))
+      const nextModelAliases = normalizeModelAliases(next.modelAliases ?? modelAliases, Array.from(configuredModels))
       const nextRetry = next.retry ?? retry
       const nextApiKey = next.apiKey ?? projectApiKey
       if (nextProviders.length !== sourceProviders.length) {
@@ -185,6 +196,7 @@ function App() {
             providers: nextProviders.map(toApiProvider),
             model_priority: nextPriority,
             fallback_models: nextFallbacks,
+            model_aliases: nextModelAliases,
             api_key: nextApiKey,
             retry: {
               max_retries: nextRetry.maxRetries,
@@ -213,7 +225,7 @@ function App() {
         setIsSaving(false)
       }
     },
-    [accessKey, applyPayload, fallbacks, priority, projectApiKey, providers, retry],
+    [accessKey, applyPayload, fallbacks, modelAliases, priority, projectApiKey, providers, retry],
   )
 
   async function loginWithApiKey(event: FormEvent<HTMLFormElement>) {
@@ -254,6 +266,11 @@ function App() {
     remoteModels.forEach((model) => values.add(model))
     return Array.from(values).sort()
   }, [providers, remoteModels])
+
+  const configuredModels = useMemo(
+    () => Array.from(new Set(providers.flatMap((provider) => provider.models))).sort(),
+    [providers],
+  )
 
   const modelsByProviderKind = useMemo(() => {
     const groups = Object.fromEntries(
@@ -297,6 +314,7 @@ function App() {
       baseUrl: defaultBaseUrlForNewProvider(kind),
       apiKey: '',
       models: [],
+      headers: {},
       enabled: true,
     })
   }
@@ -527,14 +545,20 @@ function App() {
       const raw = await file.text()
       const value = JSON.parse(raw)
       const imported = providersFromImport(value)
-      if (!imported.length) {
-        setToast('没有发现可导入的提供商')
+      const importedAliases = normalizeModelAliases(
+        modelAliasesFromImport(value),
+        [...providers, ...imported].flatMap((provider) => provider.models),
+      )
+      if (!imported.length && !Object.keys(importedAliases).length) {
+        setToast('没有发现可导入的配置')
         return
       }
       const nextProviders = [...providers, ...imported]
+      const nextAliases = { ...modelAliases, ...importedAliases }
       setProviders(nextProviders)
-      void persistConfig({ providers: nextProviders })
-      setToast(`已导入 ${imported.length} 个提供商`)
+      setModelAliases(nextAliases)
+      void persistConfig({ providers: nextProviders, modelAliases: nextAliases })
+      setToast(`已导入 ${imported.length} 个提供商，${Object.keys(importedAliases).length} 个别名`)
     } catch {
       setToast('导入失败，请检查 JSON 格式')
     }
@@ -584,6 +608,12 @@ function App() {
     setFallbacks(nextFallbacks)
     setShowAddFallback(false)
     void persistConfig({ fallbacks: nextFallbacks })
+  }
+
+  function updateModelAliases(nextAliases: Record<string, string>) {
+    const normalized = normalizeModelAliases(nextAliases, configuredModels)
+    setModelAliases(normalized)
+    void persistConfig({ modelAliases: normalized })
   }
 
   function openFallbackEditor() {
@@ -779,7 +809,9 @@ function App() {
               priority={priority}
               fallbacks={fallbacks}
               allModels={allModels}
+              configuredModels={configuredModels}
               modelsByProviderKind={modelsByProviderKind}
+              modelAliases={modelAliases}
               providers={providers}
               onMove={movePriority}
               onReorder={reorderPriority}
@@ -788,6 +820,7 @@ function App() {
               onReorderFallback={reorderFallback}
               onAddFallbackModel={addFallbackModel}
               onAddFallback={openFallbackEditor}
+              onUpdateModelAliases={updateModelAliases}
             />
           )}
         </div>
@@ -821,6 +854,22 @@ function App() {
       )}
       {toast && <div className="toast">{toast}</div>}
     </div>
+  )
+}
+
+function normalizeModelAliases(value: Record<string, string> | undefined, availableModels: string[]) {
+  const availableModelSet = new Set(availableModels)
+  return Object.fromEntries(
+    Object.entries(value ?? {})
+      .map(([alias, target]) => [alias.trim(), target.trim()])
+      .filter(
+        ([alias, target]) =>
+          alias &&
+          target &&
+          alias !== target &&
+          availableModelSet.has(alias) &&
+          availableModelSet.has(target),
+      ),
   )
 }
 

@@ -216,6 +216,7 @@ pub(super) struct DashboardPayload {
     providers: Vec<DashboardProvider>,
     model_priority: Vec<String>,
     fallback_models: Vec<String>,
+    model_aliases: std::collections::HashMap<String, String>,
     retry: DashboardRetry,
     api_key: String,
     api_key_enabled: bool,
@@ -228,6 +229,8 @@ struct DashboardConfig {
     providers: Vec<DashboardProvider>,
     model_priority: Vec<String>,
     fallback_models: Vec<String>,
+    #[serde(default)]
+    model_aliases: std::collections::HashMap<String, String>,
     retry: DashboardRetry,
     #[serde(default)]
     api_key: Option<String>,
@@ -242,6 +245,8 @@ pub(super) struct DashboardProvider {
     base_url: String,
     api_key: String,
     models: Vec<String>,
+    #[serde(default)]
+    headers: std::collections::HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     auth: Option<Value>,
 }
@@ -252,6 +257,8 @@ struct ProviderModelsRequest {
     base_url: String,
     #[serde(default)]
     api_key: String,
+    #[serde(default)]
+    headers: std::collections::HashMap<String, String>,
     #[serde(default)]
     auth: Option<Value>,
 }
@@ -292,13 +299,13 @@ struct DashboardAuthConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct DashboardAuthProvider {
+pub struct DashboardAuthProvider {
     #[serde(default = "default_dashboard_provider_enabled")]
-    enabled: bool,
+    pub enabled: bool,
     #[serde(default)]
-    base_url: String,
+    pub base_url: String,
     #[serde(default)]
-    auth: Option<Value>,
+    pub auth: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -724,12 +731,12 @@ async fn probe_validation_auth(
             builder = builder.header("chatgpt-account-id", account_id);
         }
     }
-    if provider_type == ProviderType::Grok {
-        if let Some(headers) = auth.get("headers").and_then(Value::as_object) {
-            for (name, value) in headers {
-                if let Some(value) = value.as_str().filter(|value| !value.trim().is_empty()) {
-                    builder = builder.header(name, value);
-                }
+    if matches!(provider_type, ProviderType::Codex | ProviderType::Grok)
+        && let Some(headers) = auth.get("headers").and_then(Value::as_object)
+    {
+        for (name, value) in headers {
+            if let Some(value) = value.as_str().filter(|value| !value.trim().is_empty()) {
+                builder = builder.header(name, value);
             }
         }
     }
@@ -771,7 +778,7 @@ fn classify_validation_response(
     let error_type = serde_json::from_str::<Value>(body)
         .ok()
         .and_then(|value| value.get("error").cloned())
-        .and_then(|error| {
+        .map(|error| {
             let error_type = error
                 .get("type")
                 .and_then(Value::as_str)
@@ -787,7 +794,7 @@ fn classify_validation_response(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            Some((error_type, error_code, message))
+            (error_type, error_code, message)
         });
     let lower_body = body.to_lowercase();
     let invalid_auth = status_code == 401
@@ -834,7 +841,7 @@ fn validation_error_message(error_type: Option<&(String, String, String)>, body:
     body.chars().take(500).collect()
 }
 
-fn validation_auth_base_url<'a>(
+pub fn validation_auth_base_url<'a>(
     provider_type: ProviderType,
     provider: &'a DashboardAuthProvider,
     auth: &'a Value,
@@ -911,6 +918,7 @@ fn config_payload(snapshot: &AppSnapshot) -> DashboardPayload {
         providers: dashboard_providers(&snapshot.config),
         model_priority: snapshot.config.model_priority.clone(),
         fallback_models: snapshot.config.fallback_models.clone(),
+        model_aliases: snapshot.config.model_aliases.clone(),
         retry: DashboardRetry {
             max_retries: snapshot.config.retry.max_retries,
             backoff_step_ms: snapshot.config.retry.backoff_step_ms,
@@ -925,7 +933,7 @@ fn config_payload(snapshot: &AppSnapshot) -> DashboardPayload {
 }
 
 pub(super) fn models_payload(snapshot: &AppSnapshot) -> Value {
-    let data: Vec<Value> = snapshot
+    let mut data: Vec<Value> = snapshot
         .registry
         .configured_models()
         .into_iter()
@@ -937,6 +945,21 @@ pub(super) fn models_payload(snapshot: &AppSnapshot) -> Value {
             })
         })
         .collect();
+    let mut aliases: Vec<_> = snapshot.config.model_aliases.iter().collect();
+    aliases.sort_by(|a, b| a.0.cmp(b.0));
+    for (alias, target) in aliases {
+        let alias = alias.trim();
+        let target = target.trim();
+        if alias.is_empty() || target.is_empty() {
+            continue;
+        }
+        data.push(json!({
+            "id": alias,
+            "object": "model",
+            "owned_by": "alias",
+            "root": target
+        }));
+    }
     json!({ "object": "list", "data": data })
 }
 
@@ -973,11 +996,17 @@ async fn fetch_provider_models(
             .header("user-agent", oauth::CODEX_USER_AGENT)
             .header("originator", "codex-tui");
     }
-    if request.kind == "grok" {
-        if let Some(headers) = auth_headers(request.auth.as_ref()) {
-            for (name, value) in headers {
-                builder = builder.header(name, value);
-            }
+    if matches!(request.kind.as_str(), "codex" | "grok")
+        && let Some(headers) = auth_headers(request.auth.as_ref())
+    {
+        for (name, value) in headers {
+            builder = builder.header(name, value);
+        }
+    }
+    for (name, value) in &request.headers {
+        let value = value.trim();
+        if !value.is_empty() {
+            builder = builder.header(name, value);
         }
     }
 
@@ -1039,7 +1068,7 @@ fn auth_values(auth_json: Option<&Value>) -> Vec<&Value> {
     }
 }
 
-fn build_provider_models_endpoint(
+pub fn build_provider_models_endpoint(
     base_url: &str,
     provider_kind: &str,
 ) -> Result<String, ProxyError> {
@@ -1068,7 +1097,7 @@ fn build_provider_models_endpoint(
     Ok(url.to_string())
 }
 
-fn build_provider_responses_endpoint(base_url: &str) -> Result<String, ProxyError> {
+pub fn build_provider_responses_endpoint(base_url: &str) -> Result<String, ProxyError> {
     oauth::responses_endpoint(base_url)
 }
 
@@ -1289,6 +1318,7 @@ async fn stream_api_key_responses_provider(
             .header("user-agent", oauth::CODEX_USER_AGENT)
             .header("originator", "codex-tui");
     }
+    builder = apply_provider_extra_headers(builder, provider);
 
     let response = builder.send().await?;
     let status = response.status().as_u16();
@@ -1338,6 +1368,27 @@ fn write_provider_test_stream_response(res: &mut Response, response: ProviderTes
     }
 }
 
+
+fn apply_provider_extra_headers(
+    mut builder: reqwest::RequestBuilder,
+    provider: &DashboardProvider,
+) -> reqwest::RequestBuilder {
+    for (name, value) in &provider.headers {
+        let value = value.trim();
+        if !value.is_empty() {
+            builder = builder.header(name, value);
+        }
+    }
+    if matches!(provider.kind.as_str(), "codex" | "grok")
+        && let Some(headers) = auth_headers(provider.auth.as_ref())
+    {
+        for (name, value) in headers {
+            builder = builder.header(name, value);
+        }
+    }
+    builder
+}
+
 async fn test_api_key_responses_provider(
     client: &reqwest::Client,
     provider: &DashboardProvider,
@@ -1372,6 +1423,7 @@ async fn test_api_key_responses_provider(
             .header("user-agent", oauth::CODEX_USER_AGENT)
             .header("originator", "codex-tui");
     }
+    builder = apply_provider_extra_headers(builder, provider);
 
     let response = builder.send().await?;
     let status = response.status().as_u16();
@@ -1505,6 +1557,7 @@ fn provider_payload(
         base_url: base.base_url.clone(),
         api_key: base.api_key.clone(),
         models: base.models.clone(),
+        headers: base.headers.clone(),
         auth: auth_json,
     }
 }
@@ -1525,6 +1578,7 @@ impl DashboardConfig {
         }
         config.model_priority = self.model_priority;
         config.fallback_models = self.fallback_models;
+        config.model_aliases = self.model_aliases;
         config.api_key = self
             .api_key
             .map(|value| value.trim().to_string())
@@ -1554,6 +1608,7 @@ impl DashboardProvider {
             models: self.models.clone(),
             base_url: self.base_url.clone(),
             api_key: self.api_key.clone(),
+            headers: self.headers.clone(),
         }
     }
 
@@ -1657,80 +1712,5 @@ where
         Err(ProxyError::InvalidRequest(
             "auth must be a JSON object or array".to_string(),
         ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use crate::provider::types::ProviderType;
-
-    use super::{
-        DashboardAuthProvider, build_provider_models_endpoint, build_provider_responses_endpoint,
-        validation_auth_base_url,
-    };
-
-    #[test]
-    fn provider_models_endpoint_keeps_explicit_models_path() {
-        let endpoint =
-            build_provider_models_endpoint("https://api.example.com/v1/models", "claude")
-                .expect("endpoint");
-        assert_eq!(endpoint, "https://api.example.com/v1/models");
-    }
-
-    #[test]
-    fn provider_models_endpoint_uses_openai_versioned_base_path() {
-        let endpoint =
-            build_provider_models_endpoint("https://api.example.com/openai/v1", "openai_chat")
-                .expect("endpoint");
-        assert_eq!(endpoint, "https://api.example.com/openai/v1/models");
-    }
-
-    #[test]
-    fn provider_models_endpoint_adds_v1_for_non_openai_roots() {
-        let endpoint =
-            build_provider_models_endpoint("https://api.example.com/anthropic", "claude")
-                .expect("endpoint");
-        assert_eq!(endpoint, "https://api.example.com/anthropic/v1/models");
-    }
-
-    #[test]
-    fn provider_models_endpoint_uses_models_for_versioned_non_openai_paths() {
-        let endpoint =
-            build_provider_models_endpoint("https://api.example.com/gemini/v1", "gemini")
-                .expect("endpoint");
-        assert_eq!(endpoint, "https://api.example.com/gemini/v1/models");
-    }
-
-    #[test]
-    fn provider_responses_endpoint_appends_responses_to_versioned_base_path() {
-        let endpoint = build_provider_responses_endpoint("https://api.example.com/codex/v1")
-            .expect("endpoint");
-        assert_eq!(endpoint, "https://api.example.com/codex/v1/responses");
-    }
-
-    #[test]
-    fn provider_responses_endpoint_keeps_explicit_responses_path() {
-        let endpoint = build_provider_responses_endpoint("https://api.example.com/v1/responses")
-            .expect("endpoint");
-        assert_eq!(endpoint, "https://api.example.com/v1/responses");
-    }
-
-    #[test]
-    fn grok_validation_prefers_auth_base_url() {
-        let provider = DashboardAuthProvider {
-            enabled: true,
-            base_url: "https://api.x.ai/v1".to_string(),
-            auth: None,
-        };
-        let auth = json!({
-            "base_url": "https://cli-chat-proxy.grok.com/v1",
-        });
-
-        let base_url =
-            validation_auth_base_url(ProviderType::Grok, &provider, &auth, "https://api.x.ai/v1");
-
-        assert_eq!(base_url, "https://cli-chat-proxy.grok.com/v1");
     }
 }

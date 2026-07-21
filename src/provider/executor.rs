@@ -6,7 +6,7 @@ use tokio::time::{Duration, sleep};
 
 use crate::{
     error::ProxyError,
-    middleware::headers::merge_headers,
+    middleware::headers::{apply_map_headers, merge_headers},
     provider::{
         Providers, SendRequest, UpstreamResponse,
         types::{AttemptTarget, ProviderType},
@@ -42,8 +42,20 @@ pub async fn execute(
     snapshot: &AppSnapshot,
     request: ExecuteRequest,
 ) -> Result<ExecuteResult, ProxyError> {
-    let mut models_to_try = vec![request.model.clone()];
-    models_to_try.extend(fallback_chain(&request.model, &snapshot.config)?);
+    let resolved_model = snapshot.config.resolve_model_alias(&request.model);
+    if resolved_model != request.model {
+        tracing::info!(
+            requested_model = %request.model,
+            resolved_model = %resolved_model,
+            "resolved model alias"
+        );
+    }
+    let mut models_to_try = vec![resolved_model.clone()];
+    models_to_try.extend(
+        fallback_chain(&resolved_model, &snapshot.config)?
+            .into_iter()
+            .map(|model| snapshot.config.resolve_model_alias(&model)),
+    );
 
     if !models_to_try
         .iter()
@@ -99,13 +111,14 @@ pub async fn execute_image(
     snapshot: &AppSnapshot,
     request: ExecuteImageRequest,
 ) -> Result<ExecuteResult, ProxyError> {
-    let mut targets = snapshot.registry.attempt_targets(&request.model);
+    let resolved_model = snapshot.config.resolve_model_alias(&request.model);
+    let mut targets = snapshot.registry.attempt_targets(&resolved_model);
     targets.retain(|target| image_provider_config(target).is_some());
 
     if targets.is_empty() {
         return Err(ProxyError::ModelNotConfigured {
             model: request.model.clone(),
-            attempted: vec![request.model],
+            attempted: vec![resolved_model],
         });
     }
 
@@ -308,7 +321,7 @@ async fn execute_single_model(
     Ok(last_result)
 }
 
-fn should_attempt(attempts: usize, max_retries: usize) -> bool {
+pub fn should_attempt(attempts: usize, max_retries: usize) -> bool {
     attempts < max_retries
 }
 
@@ -398,7 +411,7 @@ fn config_base_url(config: &crate::config::ProviderConfig) -> &str {
     config.base_url().unwrap_or("<provider default>")
 }
 
-fn rotate_attempt_targets(targets: &mut [AttemptTarget], cursor: Option<ProviderCursor>) {
+pub fn rotate_attempt_targets(targets: &mut [AttemptTarget], cursor: Option<ProviderCursor>) {
     let Some(cursor) = cursor else {
         return;
     };
@@ -453,18 +466,19 @@ async fn try_image_target(
             target.provider_type
         )));
     };
-    let headers = merge_headers(
+    let mut headers = merge_headers(
         &request.forwarded_headers,
         &[
             ("content-type", "application/json".to_string()),
             ("authorization", format!("Bearer {}", config.api_key)),
         ],
     );
+    apply_map_headers(&mut headers, config.headers);
     let response = state
         .http
         .post(format!(
             "{}/v1/images/generations",
-            clean_image_base_url(&config.base_url)
+            clean_image_base_url(config.base_url)
         ))
         .headers(super::reqwest_headers(&headers)?)
         .json(&request.body)
@@ -502,208 +516,42 @@ async fn try_image_target(
     })
 }
 
-struct ImageProviderConfig<'a> {
-    base_url: &'a str,
-    api_key: &'a str,
+pub struct ImageProviderConfig<'a> {
+    pub base_url: &'a str,
+    pub api_key: &'a str,
+    pub headers: &'a HashMap<String, String>,
 }
 
-fn image_provider_config(target: &AttemptTarget) -> Option<ImageProviderConfig<'_>> {
+pub fn image_provider_config(target: &AttemptTarget) -> Option<ImageProviderConfig<'_>> {
     match &target.config {
         crate::config::ProviderConfig::OpenAiChat(config) => Some(ImageProviderConfig {
             base_url: &config.base.base_url,
             api_key: &config.base.api_key,
+            headers: &config.base.headers,
         }),
         crate::config::ProviderConfig::OpenAiResponses(config) => Some(ImageProviderConfig {
             base_url: &config.base.base_url,
             api_key: &config.base.api_key,
+            headers: &config.base.headers,
         }),
         crate::config::ProviderConfig::Claude(config) => Some(ImageProviderConfig {
             base_url: &config.base.base_url,
             api_key: &config.base.api_key,
+            headers: &config.base.headers,
         }),
         crate::config::ProviderConfig::Gemini(config) => Some(ImageProviderConfig {
             base_url: &config.base.base_url,
             api_key: &config.base.api_key,
+            headers: &config.base.headers,
         }),
         crate::config::ProviderConfig::Codex(_) | crate::config::ProviderConfig::Grok(_) => None,
     }
 }
 
-fn clean_image_base_url(url: &str) -> String {
+pub fn clean_image_base_url(url: &str) -> String {
     url.trim_end_matches('/')
         .strip_suffix("/v1")
         .unwrap_or_else(|| url.trim_end_matches('/'))
         .trim_end_matches('/')
         .to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{
-        config::{
-            BaseProviderConfig, CodexConfig, OneOrMany, OpenAiChatConfig, OpenAiResponsesConfig,
-            ProviderConfig,
-        },
-        provider::types::ProviderType,
-    };
-
-    use super::*;
-
-    #[test]
-    fn rotate_attempt_targets_starts_with_provider_cursor() {
-        let mut targets = vec![
-            target_with_base_url(ProviderType::Chat, 0, "https://first.example/v1"),
-            target_with_base_url(ProviderType::Chat, 1, "https://second.example/v1"),
-            target_with_base_url(ProviderType::Responses, 0, "https://responses.example/v1"),
-        ];
-
-        rotate_attempt_targets(
-            &mut targets,
-            Some(ProviderCursor {
-                provider_type: ProviderType::Chat,
-                base_url: "https://second.example/v1".to_string(),
-                config_index: 1,
-            }),
-        );
-
-        assert_eq!(
-            target_order(&targets),
-            vec![
-                (ProviderType::Chat, 1),
-                (ProviderType::Responses, 0),
-                (ProviderType::Chat, 0),
-            ]
-        );
-    }
-
-    #[test]
-    fn rotate_attempt_targets_keeps_default_order_when_cursor_is_missing() {
-        let mut targets = vec![
-            target(ProviderType::Chat, 0),
-            target(ProviderType::Responses, 0),
-        ];
-
-        rotate_attempt_targets(
-            &mut targets,
-            Some(ProviderCursor {
-                provider_type: ProviderType::Claude,
-                base_url: "https://claude.example/v1".to_string(),
-                config_index: 0,
-            }),
-        );
-
-        assert_eq!(
-            target_order(&targets),
-            vec![(ProviderType::Chat, 0), (ProviderType::Responses, 0)]
-        );
-    }
-
-    #[test]
-    fn rotate_attempt_targets_requires_matching_base_url() {
-        let mut targets = vec![
-            target_with_base_url(ProviderType::Chat, 0, "https://first.example/v1"),
-            target_with_base_url(ProviderType::Chat, 1, "https://second.example/v1"),
-        ];
-
-        rotate_attempt_targets(
-            &mut targets,
-            Some(ProviderCursor {
-                provider_type: ProviderType::Chat,
-                base_url: "https://other.example/v1".to_string(),
-                config_index: 1,
-            }),
-        );
-
-        assert_eq!(
-            target_order(&targets),
-            vec![(ProviderType::Chat, 0), (ProviderType::Chat, 1)]
-        );
-    }
-
-    #[test]
-    fn image_provider_config_uses_api_key_provider_configs() {
-        let target = target(ProviderType::Chat, 0);
-        let config = image_provider_config(&target).expect("image config");
-
-        assert_eq!(config.base_url, "https://openai.example/v1");
-        assert_eq!(config.api_key, "key");
-    }
-
-    #[test]
-    fn image_provider_config_excludes_oauth_provider_configs() {
-        let base = BaseProviderConfig {
-            enabled: true,
-            models: vec!["m".to_string()],
-            base_url: String::new(),
-            api_key: String::new(),
-        };
-        let target = AttemptTarget {
-            provider_type: ProviderType::Codex,
-            provider_index: 0,
-            config_index: 0,
-            config: ProviderConfig::Codex(CodexConfig {
-                base,
-                auth: OneOrMany::Many(Vec::new()),
-            }),
-        };
-
-        assert!(image_provider_config(&target).is_none());
-    }
-
-    #[test]
-    fn clean_image_base_url_removes_trailing_v1() {
-        assert_eq!(
-            clean_image_base_url("https://api.example.com/v1/"),
-            "https://api.example.com"
-        );
-        assert_eq!(
-            clean_image_base_url("https://api.example.com/custom"),
-            "https://api.example.com/custom"
-        );
-    }
-
-    #[test]
-    fn should_attempt_stops_at_max_retries() {
-        assert!(should_attempt(0, 1));
-        assert!(should_attempt(4, 5));
-        assert!(!should_attempt(5, 5));
-        assert!(!should_attempt(0, 0));
-    }
-
-    fn target(provider_type: ProviderType, config_index: usize) -> AttemptTarget {
-        target_with_base_url(provider_type, config_index, "https://openai.example/v1")
-    }
-
-    fn target_with_base_url(
-        provider_type: ProviderType,
-        config_index: usize,
-        base_url: &str,
-    ) -> AttemptTarget {
-        let base = BaseProviderConfig {
-            enabled: true,
-            models: vec!["m".to_string()],
-            base_url: base_url.to_string(),
-            api_key: "key".to_string(),
-        };
-        let config = match provider_type {
-            ProviderType::Chat => ProviderConfig::OpenAiChat(OpenAiChatConfig { base }),
-            ProviderType::Responses => {
-                ProviderConfig::OpenAiResponses(OpenAiResponsesConfig { base })
-            }
-            other => panic!("unsupported test provider: {other:?}"),
-        };
-        AttemptTarget {
-            provider_type,
-            provider_index: config_index,
-            config_index,
-            config,
-        }
-    }
-
-    fn target_order(targets: &[AttemptTarget]) -> Vec<(ProviderType, usize)> {
-        targets
-            .iter()
-            .map(|target| (target.provider_type, target.config_index))
-            .collect()
-    }
 }

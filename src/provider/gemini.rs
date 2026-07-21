@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::{
-    config::GeminiConfig, error::ProxyError, middleware::headers::merge_headers, protocol,
+    config::GeminiConfig, error::ProxyError, middleware::headers::{apply_map_headers, merge_headers}, protocol,
     provider::types::ProviderType,
 };
 
@@ -35,7 +35,7 @@ impl GeminiProvider {
             request.model,
             action
         );
-        let headers = merge_headers(
+        let mut headers = merge_headers(
             request.forwarded_headers,
             &[
                 ("content-type", "application/json".to_string()),
@@ -46,6 +46,7 @@ impl GeminiProvider {
                 ),
             ],
         );
+        apply_map_headers(&mut headers, &request.config.base.headers);
         let resp = request
             .client
             .post(url)

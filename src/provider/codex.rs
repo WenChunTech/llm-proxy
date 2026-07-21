@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::{
-    config::CodexConfig, error::ProxyError, middleware::headers::merge_headers, protocol,
+    config::CodexConfig, error::ProxyError, middleware::headers::{apply_map_headers, apply_optional_map_headers, merge_headers}, protocol,
     provider::types::ProviderType, state::AuthCursorKey,
 };
 
@@ -42,7 +42,7 @@ impl CodexProvider {
         let api_key = request.config.base.api_key.trim();
         let api_key = (!api_key.is_empty()).then_some(api_key);
         let provider_base_url = request.config.base.base_url.trim();
-        let (token, account_id, base_url, auth_index) = if let Some(api_key) = api_key {
+        let (token, account_id, base_url, auth_index, extra_headers) = if let Some(api_key) = api_key {
             (
                 api_key.to_string(),
                 None,
@@ -51,6 +51,7 @@ impl CodexProvider {
                 } else {
                     provider_base_url.trim_end_matches('/').to_string()
                 },
+                None,
                 None,
             )
         } else {
@@ -86,6 +87,7 @@ impl CodexProvider {
                 auth.account_id.clone(),
                 base_url,
                 Some(auth_index),
+                auth.headers.clone(),
             )
         };
         tracing::info!(
@@ -127,6 +129,8 @@ impl CodexProvider {
         if let Some(account_id) = account_id.as_ref().filter(|value| !value.is_empty()) {
             headers.insert("chatgpt-account-id".to_string(), account_id.clone());
         }
+        apply_map_headers(&mut headers, &request.config.base.headers);
+        apply_optional_map_headers(&mut headers, extra_headers.as_ref());
 
         let resp = request
             .client

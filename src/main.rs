@@ -1,26 +1,17 @@
-mod app;
-mod config;
-mod error;
-mod middleware;
-mod protocol;
-mod provider;
-mod retry;
-mod state;
-mod stream;
-
+use llm_proxy::{app, config, state};
 use salvo::prelude::*;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let loaded = config::load_config()?;
+    let loaded = config::load_config().await?;
     init_tracing(loaded.config.log_level.as_deref())?;
 
     let state = state::AppState::from_loaded(loaded)?;
     let bind = state.bind_addr().await;
     let router = app::router(state);
 
-    tracing::info!(%bind, "starting llm-proxy");
+    tracing::info!(%bind, "starting llm-proxy on http://{bind} (TLS terminated upstream, e.g. nginx)");
     let acceptor = TcpListener::new(bind).bind().await;
     Server::new(acceptor).serve(router).await;
     Ok(())

@@ -1,4 +1,5 @@
 import { Icon } from '../../components/Icon'
+import { SelectControl } from '../../components/controls/SelectControl'
 import { defaultPriority, providerMeta, providerMarkText } from '../../config/providers'
 import type { Provider, ProviderKind } from '../../types/domain'
 import { useState } from 'react'
@@ -7,7 +8,9 @@ export function RoutingView({
   priority,
   fallbacks,
   allModels,
+  configuredModels,
   modelsByProviderKind,
+  modelAliases,
   providers,
   onMove,
   onReorder,
@@ -16,11 +19,14 @@ export function RoutingView({
   onReorderFallback,
   onAddFallbackModel,
   onAddFallback,
+  onUpdateModelAliases,
 }: {
   priority: ProviderKind[]
   fallbacks: string[]
   allModels: string[]
+  configuredModels: string[]
   modelsByProviderKind: Record<ProviderKind, string[]>
+  modelAliases: Record<string, string>
   providers: Provider[]
   onMove: (index: number, direction: -1 | 1) => void
   onReorder: (sourceIndex: number, targetIndex: number) => void
@@ -29,15 +35,45 @@ export function RoutingView({
   onReorderFallback: (sourceIndex: number, targetIndex: number) => void
   onAddFallbackModel: (model: string) => void
   onAddFallback: () => void
+  onUpdateModelAliases: (aliases: Record<string, string>) => void
 }) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [draggedFallbackIndex, setDraggedFallbackIndex] = useState<number | null>(null)
+  const [aliasSource, setAliasSource] = useState('')
+  const [aliasTarget, setAliasTarget] = useState('')
+  const configuredModelOptions = configuredModels.map((model) => ({ value: model, label: model }))
+  const aliasRows = Object.entries(modelAliases).sort(([a], [b]) => a.localeCompare(b))
   const selectableModelGroups = defaultPriority
     .map((kind) => ({
       kind,
       models: modelsByProviderKind[kind].filter((model) => !fallbacks.includes(model)),
     }))
     .filter((group) => group.models.length)
+
+  function addAlias() {
+    const alias = aliasSource || configuredModels[0] || ''
+    const target = aliasTarget || configuredModels.find((model) => model !== alias) || ''
+    if (!alias || !target || alias === target || modelAliases[alias]) return
+    onUpdateModelAliases({ ...modelAliases, [alias]: target })
+    setAliasSource('')
+    setAliasTarget('')
+  }
+
+  function updateAliasRow(previousAlias: string, nextAlias: string, target: string) {
+    if (!nextAlias || !target || nextAlias === target) return
+    const nextAliases = { ...modelAliases }
+    if (previousAlias !== nextAlias) {
+      delete nextAliases[previousAlias]
+    }
+    nextAliases[nextAlias] = target
+    onUpdateModelAliases(nextAliases)
+  }
+
+  function removeAlias(alias: string) {
+    const nextAliases = { ...modelAliases }
+    delete nextAliases[alias]
+    onUpdateModelAliases(nextAliases)
+  }
 
   return (
     <>
@@ -159,6 +195,68 @@ export function RoutingView({
             {!selectableModelGroups.length && (
               <div className="empty-state small"><span>没有可添加的同步模型</span></div>
             )}
+          </div>
+        </section>
+        <section className="panel model-alias-panel">
+          <div className="panel-heading">
+            <div><span className="eyebrow">MODEL ALIASES</span><h3>模型别名</h3></div>
+            <span className="panel-caption">{aliasRows.length} 个别名</span>
+          </div>
+          <p className="panel-description">原模型与别名模型都只能从当前已配置模型中选择。</p>
+          <div className="alias-add-row">
+            <SelectControl
+              mono
+              value={aliasSource || configuredModels[0] || ''}
+              options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: '暂无可选模型' }]}
+              onChange={setAliasSource}
+              disabled={!configuredModelOptions.length}
+              ariaLabel="选择别名模型（请求名）"
+            />
+            <span className="alias-arrow">→</span>
+            <SelectControl
+              mono
+              value={aliasTarget || configuredModels.find((model) => model !== (aliasSource || configuredModels[0])) || configuredModels[0] || ''}
+              options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: '暂无可选模型' }]}
+              onChange={setAliasTarget}
+              disabled={!configuredModelOptions.length}
+              ariaLabel="选择原模型（实际路由）"
+            />
+            <button
+              className="icon-button accent-button"
+              type="button"
+              title="添加别名"
+              disabled={configuredModels.length < 2}
+              onClick={addAlias}
+            >
+              <Icon name="plus" size={16} />
+            </button>
+          </div>
+          <div className="alias-list">
+            {aliasRows.map(([alias, target]) => (
+              <div className="alias-row" key={alias}>
+                <SelectControl
+                  mono
+                  value={alias}
+                  options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: '暂无可选模型' }]}
+                  onChange={(nextAlias) => updateAliasRow(alias, nextAlias, target)}
+                  disabled={!configuredModelOptions.length}
+                  ariaLabel={`修改别名模型 ${alias}`}
+                />
+                <span className="alias-arrow">→</span>
+                <SelectControl
+                  mono
+                  value={target}
+                  options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: '暂无可选模型' }]}
+                  onChange={(nextTarget) => updateAliasRow(alias, alias, nextTarget)}
+                  disabled={!configuredModelOptions.length}
+                  ariaLabel={`选择 ${alias} 的原模型`}
+                />
+                <button className="icon-button subtle danger-button" type="button" title="移除别名" onClick={() => removeAlias(alias)}>
+                  <Icon name="trash" size={15} />
+                </button>
+              </div>
+            ))}
+            {!aliasRows.length && <div className="empty-state small"><span>还没有模型别名</span></div>}
           </div>
         </section>
       </div>

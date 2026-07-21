@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::{
-    config::GrokConfig, error::ProxyError, middleware::headers::merge_headers, protocol,
+    config::GrokConfig, error::ProxyError, middleware::headers::{apply_map_headers, apply_optional_map_headers, merge_headers}, protocol,
     provider::types::ProviderType, state::AuthCursorKey,
 };
 
@@ -117,14 +117,8 @@ impl GrokProvider {
                 ),
             ],
         );
-        if let Some(extra_headers) = &extra_headers {
-            for (name, value) in extra_headers {
-                let value = value.trim();
-                if !value.is_empty() {
-                    headers.insert(name.clone(), value.to_string());
-                }
-            }
-        }
+        apply_map_headers(&mut headers, &request.config.base.headers);
+        apply_optional_map_headers(&mut headers, extra_headers.as_ref());
 
         let resp = request
             .client

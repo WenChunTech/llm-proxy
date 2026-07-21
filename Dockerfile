@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1.7
+#
+# Runtime serves plain HTTP on port 3000. Terminate TLS at nginx (or another
+# reverse proxy) in front of this container; do not mount app certificates here.
 
 FROM oven/bun:1-alpine AS frontend
 WORKDIR /app/frontend
@@ -41,6 +44,8 @@ RUN --mount=type=ssh,required=true \
     cargo build --release --locked \
     && cp /app/target/release/llm-proxy /usr/local/bin/llm-proxy
 
+# Minimal runtime: HTTP only. ca-certificates is for outbound provider HTTPS,
+# not for terminating inbound TLS.
 FROM scratch AS runtime
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
@@ -52,6 +57,7 @@ USER 10001:10001
 ENV HOME=/data \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
+# HTTP port only; put nginx (or similar) in front for HTTPS.
 EXPOSE 3000
 ENTRYPOINT ["/usr/local/bin/llm-proxy"]
 CMD ["--config", "/data/config.json"]

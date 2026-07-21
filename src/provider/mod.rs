@@ -2,7 +2,7 @@ mod claude;
 mod codex;
 mod gemini;
 mod grok;
-pub(crate) mod oauth;
+pub mod oauth;
 mod openai;
 
 pub mod executor;
@@ -37,6 +37,12 @@ pub struct Providers {
     gemini: GeminiProvider,
     codex: CodexProvider,
     grok: GrokProvider,
+}
+
+impl Default for Providers {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Providers {

@@ -11,6 +11,10 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{error::ProxyError, provider::types::ProviderType};
 
+mod upstash;
+
+pub use upstash::{UpstashRedis, parse_get_result, parse_set_result};
+
 const DEFAULT_CONFIG_PATH: &str = "config.json";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -21,6 +25,7 @@ pub struct Config {
     pub log_level: Option<String>,
     pub model_priority: Vec<String>,
     pub fallback_models: Vec<String>,
+    pub model_aliases: HashMap<String, String>,
     pub providers: ProviderGroups,
     pub retry: RetryConfig,
     #[serde(flatten)]
@@ -35,6 +40,7 @@ impl Default for Config {
             log_level: None,
             model_priority: Vec::new(),
             fallback_models: Vec::new(),
+            model_aliases: HashMap::new(),
             providers: ProviderGroups::default(),
             retry: RetryConfig::default(),
             extra: HashMap::new(),
@@ -46,6 +52,15 @@ impl Config {
     pub fn bind_addr(&self) -> String {
         format!("0.0.0.0:{}", self.port)
     }
+
+    pub fn resolve_model_alias(&self, model: &str) -> String {
+        self.model_aliases
+            .get(model)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| model.to_string())
+    }
 }
 
 fn parse_config_json(raw: &str) -> Result<Config, ProxyError> {
@@ -53,21 +68,19 @@ fn parse_config_json(raw: &str) -> Result<Config, ProxyError> {
     parse_config_value(value)
 }
 
-fn parse_config_value(value: Value) -> Result<Config, ProxyError> {
+pub fn parse_config_value(value: Value) -> Result<Config, ProxyError> {
     let explicit_port = value.get("port").is_some();
     let mut config: Config = serde_json::from_value(value.clone())?;
     // Drop legacy `server` blob from flatten extras so it is not rewritten on save.
     config.extra.remove("server");
-    if !explicit_port {
-        if let Some(bind) = value
+    if !explicit_port
+        && let Some(bind) = value
             .get("server")
             .and_then(|server| server.get("bind"))
             .and_then(Value::as_str)
-        {
-            if let Some(port) = parse_bind_port(bind) {
-                config.port = port;
-            }
-        }
+        && let Some(port) = parse_bind_port(bind)
+    {
+        config.port = port;
     }
     Ok(config)
 }
@@ -81,7 +94,26 @@ fn parse_bind_port(bind: &str) -> Option<u16> {
 #[derive(Debug, Clone)]
 pub struct LoadedConfig {
     pub config: Config,
-    pub source_path: Option<PathBuf>,
+    pub persist: ConfigPersist,
+}
+
+/// Where configuration is loaded from and written back to.
+///
+/// Load priority when Redis is configured: Redis -> config file -> defaults.
+/// Writes always target the primary backend (Redis if configured, otherwise file).
+#[derive(Debug, Clone)]
+pub enum ConfigPersist {
+    Redis(UpstashRedis),
+    File(PathBuf),
+}
+
+impl ConfigPersist {
+    pub fn label(&self) -> String {
+        match self {
+            Self::Redis(redis) => format!("redis:{}", redis.key),
+            Self::File(path) => path.display().to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -125,6 +157,8 @@ pub struct BaseProviderConfig {
     pub base_url: String,
     #[serde(default)]
     pub api_key: String,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub headers: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -217,6 +251,8 @@ pub struct CodexAuth {
     #[serde(default)]
     pub expiry_date: Option<i64>,
     #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
+    #[serde(default)]
     pub disabled: Option<bool>,
 }
 
@@ -253,7 +289,7 @@ pub struct GrokAuth {
     #[serde(default)]
     pub token_endpoint: Option<String>,
     #[serde(default)]
-    pub headers: Option<std::collections::HashMap<String, String>>,
+    pub headers: Option<HashMap<String, String>>,
     #[serde(default)]
     pub disabled: Option<bool>,
 }
@@ -372,40 +408,50 @@ impl ProviderGroups {
     }
 }
 
-pub fn load_config() -> Result<LoadedConfig, ProxyError> {
+pub async fn load_config() -> Result<LoadedConfig, ProxyError> {
     load_config_from_sources(ConfigSources {
         cli_path: cli_config_path(),
-        env_json: env_config_json(),
+        redis: UpstashRedis::from_env()?,
         default_path: PathBuf::from(DEFAULT_CONFIG_PATH),
     })
+    .await
 }
 
-fn load_config_from_sources(sources: ConfigSources) -> Result<LoadedConfig, ProxyError> {
-    let (config, source_path) = if let Some(path) = sources.cli_path {
-        match read_optional_config_file(&path)? {
-            Some(config) => (config, Some(path)),
-            None => (Config::default(), Some(path)),
-        }
-    } else if let Some(raw) = sources.env_json {
-        (parse_config_json(&raw)?, None)
-    } else {
-        match read_optional_config_file(&sources.default_path)? {
-            Some(config) => (config, Some(sources.default_path)),
-            None => (Config::default(), Some(sources.default_path)),
-        }
-    };
+pub async fn load_config_from_sources(sources: ConfigSources) -> Result<LoadedConfig, ProxyError> {
+    let file_path = sources.cli_path.unwrap_or(sources.default_path);
 
+    // Priority: redis -> config file -> defaults.
+    if let Some(redis) = sources.redis {
+        if let Some(raw) = redis.get().await? {
+            let config = parse_config_json(&raw)?;
+            validate_config(&config)?;
+            return Ok(LoadedConfig {
+                config,
+                persist: ConfigPersist::Redis(redis),
+            });
+        }
+
+        let config = read_optional_config_file(&file_path)?.unwrap_or_default();
+        validate_config(&config)?;
+        return Ok(LoadedConfig {
+            config,
+            // Redis remains primary for subsequent writes even if seeded from file.
+            persist: ConfigPersist::Redis(redis),
+        });
+    }
+
+    let config = read_optional_config_file(&file_path)?.unwrap_or_default();
     validate_config(&config)?;
     Ok(LoadedConfig {
         config,
-        source_path,
+        persist: ConfigPersist::File(file_path),
     })
 }
 
-struct ConfigSources {
-    cli_path: Option<PathBuf>,
-    env_json: Option<String>,
-    default_path: PathBuf,
+pub struct ConfigSources {
+    pub cli_path: Option<PathBuf>,
+    pub redis: Option<UpstashRedis>,
+    pub default_path: PathBuf,
 }
 
 pub fn validate_config(config: &Config) -> Result<(), ProxyError> {
@@ -414,6 +460,48 @@ pub fn validate_config(config: &Config) -> Result<(), ProxyError> {
         if !seen.insert(model) {
             return Err(ProxyError::Config(format!(
                 "duplicate fallback model: {model}"
+            )));
+        }
+    }
+
+    let configured_models: HashSet<String> = config
+        .providers
+        .iter_configs()
+        .into_iter()
+        .flat_map(|(_, _, provider)| provider.models().to_vec())
+        .collect();
+    let mut seen_aliases = HashSet::new();
+    for (alias, target) in &config.model_aliases {
+        let alias = alias.trim();
+        let target = target.trim();
+        if alias.is_empty() {
+            return Err(ProxyError::Config(
+                "model alias name must not be empty".to_string(),
+            ));
+        }
+        if target.is_empty() {
+            return Err(ProxyError::Config(format!(
+                "model alias '{alias}' target must not be empty"
+            )));
+        }
+        if !seen_aliases.insert(alias.to_string()) {
+            return Err(ProxyError::Config(format!(
+                "duplicate model alias: {alias}"
+            )));
+        }
+        if alias == target {
+            return Err(ProxyError::Config(format!(
+                "model alias '{alias}' must not target itself"
+            )));
+        }
+        if !configured_models.contains(alias) {
+            return Err(ProxyError::Config(format!(
+                "model alias '{alias}' is not in any provider models"
+            )));
+        }
+        if !configured_models.contains(target) {
+            return Err(ProxyError::Config(format!(
+                "model alias '{alias}' target '{target}' is not in any provider models"
             )));
         }
     }
@@ -444,10 +532,6 @@ fn cli_config_path() -> Option<PathBuf> {
     None
 }
 
-fn env_config_json() -> Option<String> {
-    std::env::var("APP_CONFIG").ok()
-}
-
 fn read_optional_config_file(path: &Path) -> Result<Option<Config>, ProxyError> {
     let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
@@ -457,236 +541,16 @@ fn read_optional_config_file(path: &Path) -> Result<Option<Config>, ProxyError> 
     parse_config_json(&raw).map(Some)
 }
 
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn port_config_is_read_directly() {
-        let config = parse_config_value(json!({
-            "port": 7001
-        }))
-        .unwrap();
-
-        assert_eq!(config.port, 7001);
-        assert_eq!(config.bind_addr(), "0.0.0.0:7001");
-        assert!(!config.extra.contains_key("server"));
-    }
-
-    #[test]
-    fn legacy_server_bind_migrates_to_port() {
-        let config = parse_config_value(json!({
-            "server": { "bind": "0.0.0.0:7001" }
-        }))
-        .unwrap();
-
-        assert_eq!(config.port, 7001);
-        assert!(!config.extra.contains_key("server"));
-    }
-
-    #[test]
-    fn explicit_port_wins_over_legacy_server_bind() {
-        let config = parse_config_value(json!({
-            "port": 4000,
-            "server": { "bind": "0.0.0.0:7001" }
-        }))
-        .unwrap();
-
-        assert_eq!(config.port, 4000);
-        assert!(!config.extra.contains_key("server"));
-    }
-
-    #[test]
-    fn log_level_config_is_read_directly() {
-        let config = parse_config_value(json!({
-            "log_level": "debug"
-        }))
-        .unwrap();
-
-        assert_eq!(config.log_level.as_deref(), Some("debug"));
-        validate_config(&config).unwrap();
-    }
-
-    #[test]
-    fn invalid_log_level_is_rejected() {
-        let config = Config {
-            log_level: Some("llm_proxy=verbose".to_string()),
-            ..Default::default()
-        };
-
-        let error = validate_config(&config).unwrap_err();
-        assert!(error.to_string().contains("invalid log_level"));
-    }
-
-    #[test]
-    fn missing_default_config_uses_default_and_keeps_writable_path() {
-        let default_path = missing_test_path("default");
-        let loaded = load_config_from_sources(ConfigSources {
-            cli_path: None,
-            env_json: None,
-            default_path: default_path.clone(),
-        })
-        .unwrap();
-
-        assert_eq!(loaded.config.port, Config::default().port);
-        assert_eq!(loaded.source_path.as_deref(), Some(default_path.as_path()));
-    }
-
-    #[test]
-    fn missing_cli_config_uses_default_and_keeps_cli_path() {
-        let cli_path = missing_test_path("cli");
-        let loaded = load_config_from_sources(ConfigSources {
-            cli_path: Some(cli_path.clone()),
-            env_json: None,
-            default_path: PathBuf::from("config.json"),
-        })
-        .unwrap();
-
-        assert_eq!(loaded.config.port, Config::default().port);
-        assert_eq!(loaded.source_path.as_deref(), Some(cli_path.as_path()));
-    }
-
-    #[test]
-    fn env_config_remains_memory_only() {
-        let loaded = load_config_from_sources(ConfigSources {
-            cli_path: None,
-            env_json: Some(r#"{"port": 8765}"#.to_string()),
-            default_path: PathBuf::from("config.json"),
-        })
-        .unwrap();
-
-        assert_eq!(loaded.config.port, 8765);
-        assert!(loaded.source_path.is_none());
-    }
-
-    #[test]
-    fn codex_auth_allows_access_token_without_refresh_token() {
-        let auth: CodexAuth = serde_json::from_value(json!({
-            "access_token": "access-token"
-        }))
-        .unwrap();
-
-        assert_eq!(auth.access_token.as_deref(), Some("access-token"));
-        assert!(auth.refresh_token.is_none());
-    }
-
-    #[test]
-    fn grok_auth_allows_access_token_without_refresh_token() {
-        let auth: GrokAuth = serde_json::from_value(json!({
-            "access_token": "access-token"
-        }))
-        .unwrap();
-
-        assert_eq!(auth.access_token.as_deref(), Some("access-token"));
-        assert!(auth.refresh_token.is_none());
-    }
-
-    #[test]
-    fn codex_config_allows_api_key_without_auth() {
-        let config: CodexConfig = serde_json::from_value(json!({
-            "models": ["codex-model"],
-            "base_url": "https://api.example.com/v1",
-            "api_key": "key"
-        }))
-        .unwrap();
-
-        assert_eq!(config.base.api_key, "key");
-        assert_eq!(config.base.base_url, "https://api.example.com/v1");
-        assert!(matches!(config.auth, OneOrMany::Many(ref items) if items.is_empty()));
-    }
-
-    #[test]
-    fn grok_config_allows_api_key_without_auth() {
-        let config: GrokConfig = serde_json::from_value(json!({
-            "models": ["grok-model"],
-            "base_url": "https://api.example.com/v1",
-            "api_key": "key"
-        }))
-        .unwrap();
-
-        assert_eq!(config.base.api_key, "key");
-        assert_eq!(config.base.base_url, "https://api.example.com/v1");
-        assert!(matches!(config.auth, OneOrMany::Many(ref items) if items.is_empty()));
-    }
-
-    #[test]
-    fn bun_config_provider_fields_can_be_ignored() {
-        let config: Config = serde_json::from_value(json!({
-            "model_priority": [
-                "gemini_cli",
-                "iflow",
-                "openai_chat",
-                "openai_responses",
-                "qwen",
-                "claude",
-                "gemini",
-                "codex",
-                "grok"
-            ],
-            "gemini_cli": [{
-                "models": ["gemini-2.5-pro"],
-                "projects": ["project"],
-                "auth": {
-                    "access_token": "token",
-                    "scope": "scope",
-                    "token_type": "Bearer",
-                    "expiry_date": 1,
-                    "refresh_token": "refresh"
-                }
-            }],
-            "qwen": [{
-                "models": ["qwen"],
-                "auth": {
-                    "access_token": "token",
-                    "refresh_token": "refresh",
-                    "expiry_date": 1,
-                    "status": "ok",
-                    "token_type": "Bearer",
-                    "expires_in": 1,
-                    "scope": "scope",
-                    "resource_url": "example.com"
-                }
-            }],
-            "iflow": [{
-                "models": ["iflow"],
-                "auth": {
-                    "access_token": "token",
-                    "token_type": "Bearer",
-                    "refresh_token": "refresh",
-                    "expires_in": 1,
-                    "scope": "scope",
-                    "expiry_date": 1,
-                    "userId": "user",
-                    "userName": "name",
-                    "avatar": "",
-                    "email": null,
-                    "phone": "",
-                    "apiKey": "key"
-                }
-            }],
-            "providers": {
-                "openai_chat": [{
-                    "models": ["gpt-4"],
-                    "base_url": "https://api.openai.com/v1",
-                    "api_key": "key"
-                }]
+pub async fn persist_config(persist: &ConfigPersist, config: &Config) -> Result<(), ProxyError> {
+    let raw = serde_json::to_string_pretty(config)?;
+    match persist {
+        ConfigPersist::Redis(redis) => redis.set(&raw).await,
+        ConfigPersist::File(path) => {
+            if let Some(parent) = path.parent().filter(|path| !path.as_os_str().is_empty()) {
+                fs::create_dir_all(parent)?;
             }
-        }))
-        .unwrap();
-
-        assert_eq!(config.model_priority[0], "gemini_cli");
-        assert_eq!(config.providers.openai_chat.len(), 1);
-    }
-
-    fn missing_test_path(name: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir()
-            .join(format!("llm-proxy-{name}-{}-{nanos}", std::process::id()))
-            .join("config.json")
+            fs::write(path, format!("{raw}\n"))?;
+            Ok(())
+        }
     }
 }

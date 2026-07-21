@@ -3,7 +3,7 @@ use serde_json::Value;
 use crate::{
     config::{OpenAiChatConfig, OpenAiResponsesConfig},
     error::ProxyError,
-    middleware::headers::merge_headers,
+    middleware::headers::{apply_map_headers, merge_headers},
     protocol,
     provider::types::ProviderType,
 };
@@ -31,7 +31,7 @@ impl OpenAiChatProvider {
         &self,
         request: TypedSendRequest<'_, OpenAiChatConfig>,
     ) -> Result<UpstreamResponse, ProxyError> {
-        let headers = merge_headers(
+        let mut headers = merge_headers(
             request.forwarded_headers,
             &[
                 ("content-type", "application/json".to_string()),
@@ -41,6 +41,7 @@ impl OpenAiChatProvider {
                 ),
             ],
         );
+        apply_map_headers(&mut headers, &request.config.base.headers);
         let resp = request
             .client
             .post(format!(
@@ -76,7 +77,7 @@ impl OpenAiResponsesProvider {
         &self,
         request: TypedSendRequest<'_, OpenAiResponsesConfig>,
     ) -> Result<UpstreamResponse, ProxyError> {
-        let headers = merge_headers(
+        let mut headers = merge_headers(
             request.forwarded_headers,
             &[
                 ("content-type", "application/json".to_string()),
@@ -86,6 +87,7 @@ impl OpenAiResponsesProvider {
                 ),
             ],
         );
+        apply_map_headers(&mut headers, &request.config.base.headers);
         let resp = request
             .client
             .post(format!(

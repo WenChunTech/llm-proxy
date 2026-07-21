@@ -14,6 +14,7 @@ export function fromApiProvider(provider: ApiProvider): Provider {
     baseUrl: provider.base_url,
     apiKey: provider.api_key,
     models: provider.models,
+    headers: normalizeHeaders(provider.headers),
     enabled: provider.enabled,
     auth: provider.auth,
   }
@@ -28,6 +29,7 @@ export function toApiProvider(provider: Provider): ApiProvider {
     base_url: provider.baseUrl,
     api_key: provider.apiKey,
     models: provider.models,
+    headers: normalizeHeaders(provider.headers),
     auth: provider.auth,
   }
 }
@@ -41,6 +43,7 @@ export function toApiProviderDraft(provider: ProviderDraft): ApiProvider {
     base_url: provider.baseUrl,
     api_key: provider.apiKey,
     models: provider.models,
+    headers: normalizeHeaders(provider.headers),
     auth: provider.auth,
   }
 }
@@ -70,6 +73,7 @@ export function buildConfigExport(
   providers: Provider[],
   priority: ProviderKind[],
   fallbacks: string[],
+  modelAliases: Record<string, string>,
   retry: RetryConfig,
   apiKey: string,
   port: number,
@@ -79,6 +83,7 @@ export function buildConfigExport(
     api_key: apiKey,
     model_priority: priority,
     fallback_models: fallbacks,
+    model_aliases: modelAliases,
     providers: Object.fromEntries(
       defaultPriority.map((kind) => [
         kind,
@@ -100,6 +105,7 @@ export function toRuntimeProviderConfig(provider: Provider) {
     models: provider.models,
     base_url: provider.baseUrl,
     api_key: provider.apiKey,
+    ...(Object.keys(provider.headers).length ? { headers: provider.headers } : {}),
     ...(provider.auth === undefined ? {} : { auth: provider.auth }),
   }
 }
@@ -107,6 +113,11 @@ export function toRuntimeProviderConfig(provider: Provider) {
 export function providersFromImport(value: unknown): Provider[] {
   if (!isRecord(value) || !isRecord(value.providers)) return []
   return importProvidersByKind(value.providers)
+}
+
+export function modelAliasesFromImport(value: unknown) {
+  if (!isRecord(value)) return {}
+  return normalizeModelAliases(value.model_aliases)
 }
 
 function importProvidersByKind(value: Record<string, unknown>) {
@@ -132,6 +143,7 @@ function importConfigProvider(kind: ProviderKind, value: unknown, index: number)
       : defaultBaseUrlForImportedProvider(kind),
     apiKey: typeof value.api_key === 'string' ? value.api_key : '',
     models: normalizeStringArray(value.models),
+    headers: normalizeHeaders(value.headers),
     auth: kind === 'codex' || kind === 'grok' ? auth : undefined,
   }
 }
@@ -140,4 +152,24 @@ function normalizeStringArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim()))
     : []
+}
+
+function normalizeHeaders(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string')
+      .map(([name, headerValue]) => [name.trim(), headerValue.trim()])
+      .filter(([name, headerValue]) => name && headerValue),
+  )
+}
+
+function normalizeModelAliases(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string')
+      .map(([alias, target]) => [alias.trim(), target.trim()])
+      .filter(([alias, target]) => alias && target),
+  )
 }

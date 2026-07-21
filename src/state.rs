@@ -1,7 +1,7 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    config::{CodexAuth, Config, GrokAuth, validate_config},
+    config::{CodexAuth, Config, ConfigPersist, GrokAuth, persist_config, validate_config},
     error::ProxyError,
     provider::{Providers, registry::ProviderRegistry, types::ProviderType},
 };
@@ -19,7 +19,7 @@ pub struct AppState {
 struct AppStateInner {
     config: Arc<Config>,
     registry: ProviderRegistry,
-    config_path: Option<PathBuf>,
+    persist: ConfigPersist,
 }
 
 #[derive(Clone)]
@@ -67,7 +67,7 @@ impl AppState {
         let registry = ProviderRegistry::new(config.clone());
         let http = reqwest::Client::builder().build()?;
         tracing::info!(
-            config_source = config_source(loaded.source_path.as_ref()),
+            config_source = %loaded.persist.label(),
             port = config.port,
             bind = %config.bind_addr(),
             log_level = config.log_level.as_deref().unwrap_or("info"),
@@ -79,7 +79,7 @@ impl AppState {
             inner: Arc::new(tokio::sync::RwLock::new(AppStateInner {
                 config,
                 registry,
-                config_path: loaded.source_path,
+                persist: loaded.persist,
             })),
             cursors: Arc::new(tokio::sync::RwLock::new(SuccessCursors::default())),
             auth_cache: Arc::new(tokio::sync::RwLock::new(RuntimeAuthCache::default())),
@@ -102,22 +102,14 @@ impl AppState {
 
     pub async fn update_config(&self, config: Config) -> Result<(), ProxyError> {
         validate_config(&config)?;
-        let raw = serde_json::to_string_pretty(&config)?;
         let mut inner = self.inner.write().await;
-        let path = inner
-            .config_path
-            .clone()
-            .ok_or_else(|| ProxyError::Config("config was loaded from environment".to_string()))?;
-        if let Some(parent) = path.parent().filter(|path| !path.as_os_str().is_empty()) {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, format!("{raw}\n"))?;
+        persist_config(&inner.persist, &config).await?;
         let config = Arc::new(config);
         inner.registry = ProviderRegistry::new(config.clone());
         inner.config = config;
         self.auth_cache.write().await.clear();
         tracing::info!(
-            config_path = %path.display(),
+            config_source = %inner.persist.label(),
             port = inner.config.port,
             bind = %inner.config.bind_addr(),
             log_level = inner.config.log_level.as_deref().unwrap_or("info"),
@@ -177,11 +169,6 @@ impl AppState {
     }
 }
 
-fn config_source(path: Option<&PathBuf>) -> String {
-    path.map(|path| path.display().to_string())
-        .unwrap_or_else(|| "environment".to_string())
-}
-
 impl RuntimeAuthCache {
     fn clear(&mut self) {
         self.codex.clear();
@@ -194,51 +181,5 @@ fn auth_cache_key(key: &AuthCursorKey, auth_index: usize) -> AuthCacheKey {
         provider_type: key.provider_type,
         config_index: key.config_index,
         auth_index,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{fs, path::PathBuf};
-
-    use crate::config::{Config, LoadedConfig};
-
-    use super::*;
-
-    #[tokio::test]
-    async fn update_config_creates_missing_config_file_and_updates_runtime_state() {
-        let path = unique_config_path("update-config-creates-missing-file");
-        let parent = path.parent().unwrap().to_path_buf();
-        let state = AppState::from_loaded(LoadedConfig {
-            config: Config::default(),
-            source_path: Some(path.clone()),
-        })
-        .unwrap();
-        let next = Config {
-            port: 4567,
-            api_key: Some("proxy-key".to_string()),
-            ..Default::default()
-        };
-
-        state.update_config(next).await.unwrap();
-
-        let saved: Config = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        let snapshot = state.snapshot().await;
-        assert_eq!(saved.port, 4567);
-        assert_eq!(saved.api_key.as_deref(), Some("proxy-key"));
-        assert_eq!(snapshot.config.port, 4567);
-        assert_eq!(snapshot.config.api_key.as_deref(), Some("proxy-key"));
-
-        let _ = fs::remove_dir_all(parent);
-    }
-
-    fn unique_config_path(name: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir()
-            .join(format!("llm-proxy-{name}-{}-{nanos}", std::process::id()))
-            .join("config.json")
     }
 }

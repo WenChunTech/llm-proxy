@@ -41,3 +41,6 @@ dist-ssr/
 # Miscellaneous local files.
 img.html
 img.json
+
+# Host-built binary staged for Docker packaging
+docker/llm-proxy

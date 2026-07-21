@@ -16,12 +16,12 @@ pub(crate) const DEFAULT_GROK_TOKEN_ENDPOINT: &str = "https://auth.x.ai/oauth/to
 pub(crate) const XAI_CLIENT_ID: &str = "b1a00492-073a-47ea-816f-4c329264a828";
 
 #[derive(Debug)]
-pub(crate) struct AccessToken {
-    pub(crate) token: String,
-    pub(crate) refreshed: bool,
+pub struct AccessToken {
+    pub token: String,
+    pub refreshed: bool,
 }
 
-pub(crate) fn responses_endpoint(base_url: &str) -> Result<String, ProxyError> {
+pub fn responses_endpoint(base_url: &str) -> Result<String, ProxyError> {
     let mut url = reqwest::Url::parse(base_url.trim())
         .map_err(|_| ProxyError::InvalidRequest("invalid base_url".to_string()))?;
     let pathname = url.path().trim_end_matches('/').to_string();
@@ -39,7 +39,7 @@ pub(crate) fn responses_endpoint(base_url: &str) -> Result<String, ProxyError> {
     Ok(url.to_string())
 }
 
-pub(crate) fn codex_oauth_base_url(provider_base_url: Option<&str>, auth: &CodexAuth) -> String {
+pub fn codex_oauth_base_url(provider_base_url: Option<&str>, auth: &CodexAuth) -> String {
     auth.base_url
         .as_deref()
         .filter(|value| !value.trim().is_empty())
@@ -49,7 +49,7 @@ pub(crate) fn codex_oauth_base_url(provider_base_url: Option<&str>, auth: &Codex
         .to_string()
 }
 
-pub(crate) fn grok_oauth_base_url(provider_base_url: Option<&str>, auth: &GrokAuth) -> String {
+pub fn grok_oauth_base_url(provider_base_url: Option<&str>, auth: &GrokAuth) -> String {
     auth.base_url
         .as_deref()
         .filter(|value| !value.trim().is_empty())
@@ -59,7 +59,7 @@ pub(crate) fn grok_oauth_base_url(provider_base_url: Option<&str>, auth: &GrokAu
         .to_string()
 }
 
-pub(crate) fn select_codex_auth(
+pub fn select_codex_auth(
     auth: &OneOrMany<CodexAuth>,
     start_index: Option<usize>,
     target_attempt: usize,
@@ -67,7 +67,7 @@ pub(crate) fn select_codex_auth(
     select_auth(auth, start_index, target_attempt, "Codex")
 }
 
-pub(crate) fn select_grok_auth(
+pub fn select_grok_auth(
     auth: &OneOrMany<GrokAuth>,
     start_index: Option<usize>,
     target_attempt: usize,
@@ -75,7 +75,7 @@ pub(crate) fn select_grok_auth(
     select_auth(auth, start_index, target_attempt, "Grok")
 }
 
-pub(crate) async fn codex_access_token(
+pub async fn codex_access_token(
     client: &reqwest::Client,
     auth: &mut CodexAuth,
 ) -> Result<AccessToken, ProxyError> {
@@ -92,7 +92,7 @@ pub(crate) async fn codex_access_token(
     })
 }
 
-pub(crate) async fn grok_access_token(
+pub async fn grok_access_token(
     client: &reqwest::Client,
     auth: &mut GrokAuth,
 ) -> Result<AccessToken, ProxyError> {
@@ -158,7 +158,7 @@ pub(crate) async fn refresh_grok_auth_value(
     Ok(())
 }
 
-pub(crate) fn current_millis() -> i64 {
+pub fn current_millis() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -478,96 +478,5 @@ fn set_auth_string(auth: &mut Value, key: &str, value: String) {
 fn set_auth_i64(auth: &mut Value, key: &str, value: i64) {
     if let Some(object) = auth.as_object_mut() {
         object.insert(key.to_string(), Value::Number(value.into()));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn responses_endpoint_appends_responses_to_versioned_base_path() {
-        let endpoint = responses_endpoint("https://api.example.com/codex/v1").expect("endpoint");
-        assert_eq!(endpoint, "https://api.example.com/codex/v1/responses");
-    }
-
-    #[test]
-    fn responses_endpoint_keeps_explicit_responses_path() {
-        let endpoint =
-            responses_endpoint("https://api.example.com/v1/responses").expect("endpoint");
-        assert_eq!(endpoint, "https://api.example.com/v1/responses");
-    }
-
-    #[test]
-    fn codex_oauth_base_url_prefers_auth_base_url() {
-        let auth: CodexAuth = serde_json::from_value(json!({
-            "base_url": "https://chatgpt.example/backend-api/codex/"
-        }))
-        .unwrap();
-
-        let base_url = codex_oauth_base_url(Some("https://provider.example/codex"), &auth);
-
-        assert_eq!(base_url, "https://chatgpt.example/backend-api/codex");
-    }
-
-    #[test]
-    fn grok_oauth_base_url_prefers_auth_base_url() {
-        let auth: GrokAuth = serde_json::from_value(json!({
-            "base_url": "https://cli-chat-proxy.grok.com/v1/"
-        }))
-        .unwrap();
-
-        let base_url = grok_oauth_base_url(Some("https://api.x.ai/v1"), &auth);
-
-        assert_eq!(base_url, "https://cli-chat-proxy.grok.com/v1");
-    }
-
-    #[test]
-    fn codex_auth_selection_starts_from_success_cursor() {
-        let auth: OneOrMany<CodexAuth> = serde_json::from_value(json!([
-            { "access_token": "first" },
-            { "access_token": "disabled", "disabled": true },
-            { "access_token": "second" }
-        ]))
-        .unwrap();
-
-        let (idx, selected) = select_codex_auth(&auth, None, 1).unwrap();
-        assert_eq!(idx, 0);
-        assert_eq!(selected.access_token.as_deref(), Some("first"));
-
-        let (idx, selected) = select_codex_auth(&auth, None, 2).unwrap();
-        assert_eq!(idx, 2);
-        assert_eq!(selected.access_token.as_deref(), Some("second"));
-    }
-
-    #[tokio::test]
-    async fn codex_access_token_uses_unexpired_access_token_without_refresh_token() {
-        let client = reqwest::Client::new();
-        let mut auth: CodexAuth = serde_json::from_value(json!({
-            "access_token": "codex-access-token"
-        }))
-        .unwrap();
-
-        let token = codex_access_token(&client, &mut auth).await.unwrap();
-
-        assert_eq!(token.token, "codex-access-token");
-        assert!(!token.refreshed);
-    }
-
-    #[tokio::test]
-    async fn grok_access_token_uses_access_token_without_expiry_check() {
-        let client = reqwest::Client::new();
-        let mut auth: GrokAuth = serde_json::from_value(json!({
-            "access_token": "expired-grok-token",
-            "expiry_date": current_millis() - 1_000
-        }))
-        .unwrap();
-
-        let token = grok_access_token(&client, &mut auth).await.unwrap();
-
-        assert_eq!(token.token, "expired-grok-token");
-        assert!(!token.refreshed);
     }
 }

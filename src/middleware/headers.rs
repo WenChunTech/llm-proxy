@@ -80,3 +80,25 @@ fn header_blocked(name: &str, blocklist: &[&str]) -> bool {
         .iter()
         .any(|blocked| name.eq_ignore_ascii_case(blocked))
 }
+
+
+pub fn apply_map_headers(
+    headers: &mut crate::provider::types::HeaderMap,
+    extra: &std::collections::HashMap<String, String>,
+) {
+    for (name, value) in extra {
+        let value = value.trim();
+        if !value.is_empty() {
+            headers.insert(name.to_ascii_lowercase(), value.to_string());
+        }
+    }
+}
+
+pub fn apply_optional_map_headers(
+    headers: &mut crate::provider::types::HeaderMap,
+    extra: Option<&std::collections::HashMap<String, String>>,
+) {
+    if let Some(extra) = extra {
+        apply_map_headers(headers, extra);
+    }
+}

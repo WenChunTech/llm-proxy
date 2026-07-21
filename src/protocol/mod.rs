@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use crate::{error::ProxyError, provider::types::ProviderType};
 
-const SUPPORTED_PROTOCOL_CONVERSIONS: &[(ProviderType, ProviderType)] = &[
+pub const SUPPORTED_PROTOCOL_CONVERSIONS: &[(ProviderType, ProviderType)] = &[
     (ProviderType::Chat, ProviderType::Responses),
     (ProviderType::Chat, ProviderType::Claude),
     (ProviderType::Chat, ProviderType::Gemini),
@@ -197,43 +197,4 @@ where
 {
     let input: I = serde_json::from_value(body)?;
     Ok(serde_json::to_value(O::from(input))?)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn protocol_conversion_matrix_covers_all_non_identity_core_pairs() {
-        let protocols = [
-            ProviderType::Chat,
-            ProviderType::Responses,
-            ProviderType::Claude,
-            ProviderType::Gemini,
-        ];
-
-        for source in protocols {
-            for target in protocols {
-                if source == target {
-                    continue;
-                }
-                assert!(
-                    SUPPORTED_PROTOCOL_CONVERSIONS.contains(&(source, target)),
-                    "missing conversion matrix entry: {source:?} -> {target:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn protocol_conversion_matrix_excludes_provider_aliases() {
-        assert!(
-            !SUPPORTED_PROTOCOL_CONVERSIONS
-                .iter()
-                .any(
-                    |(source, target)| matches!(source, ProviderType::Codex | ProviderType::Grok)
-                        || matches!(target, ProviderType::Codex | ProviderType::Grok)
-                )
-        );
-    }
 }

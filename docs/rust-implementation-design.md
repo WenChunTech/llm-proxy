@@ -975,21 +975,27 @@ HTTP 映射：
 
 ## 18. 配置加载
 
-加载顺序：
+加载顺序（优先级从高到低）：
 
-1. `APP_CONFIG`
-2. `config.json`
-3. empty config
+1. Upstash Redis REST（当 `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` 配置时）
+2. 配置文件（`--config` 指定路径，否则默认 `config.json`）
+3. 内置默认配置
 
-Node 版本地优先读 `config.json`，部署优先 env/Redis。Rust 首版可以更简单，但应文档化顺序。
+写入配置时始终写回主后端：若启用了 Redis 则写 Redis；否则写配置文件。
 
-建议支持启动参数：
+环境变量：
+
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+- `UPSTASH_REDIS_CONFIG_KEY`（可选，默认 `llm-proxy:config`）
+
+启动参数：
 
 ```text
 --config config.json
 ```
 
-如提供 `--config`，则优先级最高。
+`--config` 仅影响文件路径，不改变 Redis 优先于文件的顺序。
 
 ## 19. 依赖
 

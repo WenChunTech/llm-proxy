@@ -1,29 +1,23 @@
 {
   "port": 3000,
-  "api_key": "replace-with-your-proxy-api-key",
+  "api_key": "",
   "log_level": "info",
   "model_priority": [
-    "openai_chat",
+    "codex",
+    "grok",
     "openai_responses",
     "claude",
-    "gemini",
-    "codex",
-    "grok"
+    "openai_chat",
+    "gemini"
   ],
   "fallback_models": [],
+  "model_aliases": {},
   "retry": {
     "max_retries": 5,
     "backoff_step_ms": 5000
   },
   "providers": {
-    "openai_chat": [
-      {
-        "enabled": true,
-        "models": ["gpt-4.1"],
-        "base_url": "https://api.openai.com/v1",
-        "api_key": "replace-with-openai-api-key"
-      }
-    ],
+    "openai_chat": [],
     "openai_responses": [],
     "claude": [],
     "gemini": [],

@@ -32,6 +32,10 @@ function buildProviderTestRequest(provider: ProviderDraft, model: string, prompt
     headers['user-agent'] = 'codex-tui/0.135.0'
     headers.originator = 'codex-tui'
   }
+  for (const [name, value] of Object.entries(provider.headers)) {
+    const trimmed = value.trim()
+    if (name.trim() && trimmed) headers[name.trim()] = trimmed
+  }
 
   return {
     endpoint,

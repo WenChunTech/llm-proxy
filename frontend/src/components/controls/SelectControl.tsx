@@ -86,7 +86,7 @@ export function SelectControl<T extends string>({
         }}
       >
         {selected?.accent && <span className="select-accent" style={{ backgroundColor: selected.accent }} />}
-        <span className="select-value">{selected?.label ?? ''}</span>
+        <span className="select-value" title={selected?.label ?? ''}>{selected?.label ?? ''}</span>
         <Icon name="chevron" size={13} />
       </button>
       {open && !disabled && (
@@ -102,7 +102,7 @@ export function SelectControl<T extends string>({
               onClick={() => commit(option)}
             >
               {option.accent && <span className="select-accent" style={{ backgroundColor: option.accent }} />}
-              <span>{option.label}</span>
+              <span title={option.label}>{option.label}</span>
               {option.value === value && <Icon name="check" size={13} />}
             </button>
           ))}

@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::{
-    config::ClaudeConfig, error::ProxyError, middleware::headers::merge_headers, protocol,
+    config::ClaudeConfig, error::ProxyError, middleware::headers::{apply_map_headers, merge_headers}, protocol,
     provider::types::ProviderType,
 };
 
@@ -28,7 +28,7 @@ impl ClaudeProvider {
         &self,
         request: TypedSendRequest<'_, ClaudeConfig>,
     ) -> Result<UpstreamResponse, ProxyError> {
-        let headers = merge_headers(
+        let mut headers = merge_headers(
             request.forwarded_headers,
             &[
                 ("content-type", "application/json".to_string()),
@@ -36,6 +36,7 @@ impl ClaudeProvider {
                 ("anthropic-version", "2023-06-01".to_string()),
             ],
         );
+        apply_map_headers(&mut headers, &request.config.base.headers);
         let resp = request
             .client
             .post(format!(

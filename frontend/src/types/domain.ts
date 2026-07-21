@@ -19,6 +19,7 @@ export type Provider = {
   baseUrl: string
   apiKey: string
   models: string[]
+  headers: Record<string, string>
   enabled: boolean
   auth?: unknown
 }
@@ -38,6 +39,7 @@ export type ApiProvider = {
   base_url: string
   api_key: string
   models: string[]
+  headers: Record<string, string>
   auth?: unknown
 }
 
@@ -46,6 +48,7 @@ export type DashboardPayload = {
   providers: ApiProvider[]
   model_priority: ProviderKind[]
   fallback_models: string[]
+  model_aliases: Record<string, string>
   retry: {
     max_retries: number
     backoff_step_ms: number
@@ -57,6 +60,7 @@ export type DashboardPayload = {
 export type ApiModel = {
   id: string
   owned_by: string
+  root?: string
 }
 
 export type ModelsPayload = {

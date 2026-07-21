@@ -1,4 +1,4 @@
-mod dashboard;
+pub mod dashboard;
 mod frontend;
 mod proxy;
 

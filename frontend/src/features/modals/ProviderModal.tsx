@@ -46,6 +46,8 @@ export function ProviderModal({
   const [modelInput, setModelInput] = useState('')
   const [modelSearch, setModelSearch] = useState('')
   const [showSelectedModelsOnly, setShowSelectedModelsOnly] = useState(false)
+  const [headerNameInput, setHeaderNameInput] = useState('')
+  const [headerValueInput, setHeaderValueInput] = useState('')
   const [authJson, setAuthJson] = useState(() => stringifyAuth(provider.auth))
   const [authError, setAuthError] = useState('')
   const [testModel, setTestModel] = useState(() => provider.models[0] ?? '')
@@ -72,8 +74,12 @@ export function ProviderModal({
     [modelOptions, provider.models],
   )
   const testModelOptions = useMemo(
-    () => Array.from(new Set([...provider.models, ...modelOptions, testModel.trim()])).filter(Boolean).sort(),
-    [modelOptions, provider.models, testModel],
+    () => provider.models.filter(Boolean).sort(),
+    [provider.models],
+  )
+  const headerEntries = useMemo(
+    () => Object.entries(provider.headers).sort(([a], [b]) => a.localeCompare(b)),
+    [provider.headers],
   )
   const normalizedModelSearch = modelSearch.trim().toLowerCase()
   const filteredModelOptions = modelOptionList.filter((model) =>
@@ -102,6 +108,7 @@ export function ProviderModal({
           kind: providerKind,
           base_url: providerEffectiveBaseUrl,
           api_key: providerApiKey.trim(),
+          headers: provider.headers,
           auth: providerAuth,
         }),
         signal,
@@ -116,7 +123,7 @@ export function ProviderModal({
       setModelOptions([])
       setModelStatus('error')
     }
-  }, [accessKey, providerApiKey, providerAuth, providerEffectiveBaseUrl, providerKind])
+  }, [accessKey, provider.headers, providerApiKey, providerAuth, providerEffectiveBaseUrl, providerKind])
 
   useEffect(() => {
     const endpoint = getProviderModelsEndpointFor(providerKind, providerEffectiveBaseUrl)
@@ -187,6 +194,36 @@ export function ProviderModal({
     onChange({ ...provider, models: provider.models.filter((item) => item !== model) })
   }
 
+  function addHeader() {
+    const name = headerNameInput.trim()
+    if (!name) return
+    onChange({
+      ...provider,
+      headers: {
+        ...provider.headers,
+        [name]: headerValueInput.trim(),
+      },
+    })
+    setHeaderNameInput('')
+    setHeaderValueInput('')
+  }
+
+  function updateHeaderValue(name: string, value: string) {
+    onChange({
+      ...provider,
+      headers: {
+        ...provider.headers,
+        [name]: value,
+      },
+    })
+  }
+
+  function removeHeader(name: string) {
+    const nextHeaders = { ...provider.headers }
+    delete nextHeaders[name]
+    onChange({ ...provider, headers: nextHeaders })
+  }
+
   function changeKind(kind: ProviderKind) {
     onChange({
       ...provider,
@@ -246,7 +283,8 @@ export function ProviderModal({
   }
 
   async function testCurrentModel() {
-    const model = testModel.trim() || provider.models[0]
+    const selected = testModel.trim()
+    const model = selected && provider.models.includes(selected) ? selected : provider.models[0]
     if (!model) {
       setTestStatus('error')
       setTestMessage('请先选择或添加模型')
@@ -287,7 +325,8 @@ export function ProviderModal({
   }
 
   async function copyTestCurl() {
-    const model = testModel.trim() || provider.models[0]
+    const selected = testModel.trim()
+    const model = selected && provider.models.includes(selected) ? selected : provider.models[0]
     if (!model) {
       setCurlCopyStatus('请先选择或添加模型')
       return
@@ -342,6 +381,64 @@ export function ProviderModal({
               )}
             </label>
             <label className="field"><span>API Key</span><input type="password" autoComplete="current-password" value={provider.apiKey} onChange={(event) => onChange({ ...provider, apiKey: event.target.value })} placeholder="输入上游访问密钥" /></label>
+          </section>
+          <section className="config-section">
+            <div className="config-section-heading">
+              <span className="eyebrow">HEADERS</span>
+              <h3>自定义 Headers</h3>
+            </div>
+            <div className="header-editor">
+              <div className="header-add-row">
+                <label className="header-field">
+                  <span>名称</span>
+                  <input
+                    className="header-input"
+                    value={headerNameInput}
+                    onChange={(event) => setHeaderNameInput(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addHeader() } }}
+                    placeholder="例如 X-Custom-Header"
+                  />
+                </label>
+                <label className="header-field">
+                  <span>值</span>
+                  <input
+                    className="header-input"
+                    value={headerValueInput}
+                    onChange={(event) => setHeaderValueInput(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addHeader() } }}
+                    placeholder="Header value"
+                  />
+                </label>
+                <button className="icon-button accent-button" type="button" title="添加 Header" onClick={addHeader}>
+                  <Icon name="plus" size={16} />
+                </button>
+              </div>
+              <div className="header-list">
+                {headerEntries.map(([name, value]) => (
+                  <div className="header-row" key={name}>
+                    <label className="header-field">
+                      <span>名称</span>
+                      <input className="header-input" value={name} readOnly />
+                    </label>
+                    <label className="header-field">
+                      <span>值</span>
+                      <input
+                        className="header-input"
+                        value={value}
+                        onChange={(event) => updateHeaderValue(name, event.target.value)}
+                        placeholder="Header value"
+                      />
+                    </label>
+                    <button className="icon-button subtle danger-button" type="button" title="移除 Header" onClick={() => removeHeader(name)}>
+                      <Icon name="trash" size={15} />
+                    </button>
+                  </div>
+                ))}
+                {!headerEntries.length && (
+                  <span className="model-sync-status muted-copy">暂无自定义 Header</span>
+                )}
+              </div>
+            </div>
           </section>
           {supportsAuthJson && (
             <section className="config-section">
