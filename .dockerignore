@@ -29,7 +29,10 @@ config.*.json
 converter/
 converter-wasm/
 
-frontend/
+frontend/node_modules/
+frontend/dist/
+frontend/.playwright-cli/
+frontend/.vite/
 node_modules/
 dist/
 dist-ssr/
