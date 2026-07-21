@@ -4,6 +4,7 @@ use serde_json::Value;
 use crate::{
     config::{AuthEnabled, CodexAuth, GrokAuth, OneOrMany},
     error::ProxyError,
+    util::{append_url_path, auth_string, set_auth_i64, set_auth_string},
 };
 
 pub(crate) const CODEX_USER_AGENT: &str =
@@ -166,15 +167,6 @@ pub fn current_millis() -> i64 {
         .unwrap_or_default()
 }
 
-fn append_url_path(base_path: &str, path: &str) -> String {
-    let base = base_path.trim_end_matches('/');
-    let path = path.trim_start_matches('/');
-    if base.is_empty() {
-        format!("/{path}")
-    } else {
-        format!("{base}/{path}")
-    }
-}
 
 fn select_auth<T>(
     auth: &OneOrMany<T>,
@@ -461,22 +453,5 @@ fn copy_claim_to_value(claims: &Value, auth: &mut Value, claim_name: &str, auth_
     }
 }
 
-fn auth_string(auth: &Value, key: &str) -> Option<String> {
-    auth.get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-}
 
-fn set_auth_string(auth: &mut Value, key: &str, value: String) {
-    if let Some(object) = auth.as_object_mut() {
-        object.insert(key.to_string(), Value::String(value));
-    }
-}
 
-fn set_auth_i64(auth: &mut Value, key: &str, value: i64) {
-    if let Some(object) = auth.as_object_mut() {
-        object.insert(key.to_string(), Value::Number(value.into()));
-    }
-}

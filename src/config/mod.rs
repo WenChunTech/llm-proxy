@@ -99,8 +99,9 @@ pub struct LoadedConfig {
 
 /// Where configuration is loaded from and written back to.
 ///
-/// Load priority when Redis is configured: Redis -> config file -> defaults.
-/// Writes always target the primary backend (Redis if configured, otherwise file).
+/// When Redis is configured: load from Redis only. If the key is missing, seed
+/// Redis with default config and continue with Redis as the primary backend.
+/// Without Redis: config file -> defaults. Writes always target the primary backend.
 #[derive(Debug, Clone)]
 pub enum ConfigPersist {
     Redis(UpstashRedis),
@@ -420,7 +421,7 @@ pub async fn load_config() -> Result<LoadedConfig, ProxyError> {
 pub async fn load_config_from_sources(sources: ConfigSources) -> Result<LoadedConfig, ProxyError> {
     let file_path = sources.cli_path.unwrap_or(sources.default_path);
 
-    // Priority: redis -> config file -> defaults.
+    // When Redis is configured it is exclusive: never fall back to the config file.
     if let Some(redis) = sources.redis {
         if let Some(raw) = redis.get().await? {
             let config = parse_config_json(&raw)?;
@@ -431,11 +432,13 @@ pub async fn load_config_from_sources(sources: ConfigSources) -> Result<LoadedCo
             });
         }
 
-        let config = read_optional_config_file(&file_path)?.unwrap_or_default();
+        // Key miss: initialize with defaults and seed Redis so the key exists.
+        let config = Config::default();
         validate_config(&config)?;
+        let raw = serde_json::to_string_pretty(&config)?;
+        redis.set(&raw).await?;
         return Ok(LoadedConfig {
             config,
-            // Redis remains primary for subsequent writes even if seeded from file.
             persist: ConfigPersist::Redis(redis),
         });
     }

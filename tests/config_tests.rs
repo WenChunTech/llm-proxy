@@ -132,11 +132,12 @@ async fn redis_priority_uses_redis_value_over_file() {
 }
 
 #[tokio::test]
-async fn redis_miss_falls_back_to_config_file_but_keeps_redis_persist() {
+async fn redis_miss_seeds_default_config_and_ignores_config_file() {
     let file_path = missing_test_path("redis-miss-file");
     if let Some(parent) = file_path.parent() {
         fs::create_dir_all(parent).unwrap();
     }
+    // File content must not be used when Redis is configured but the key is missing.
     fs::write(&file_path, r#"{"port": 3333}"#).unwrap();
 
     let redis = UpstashRedis::for_test(
@@ -147,14 +148,20 @@ async fn redis_miss_falls_back_to_config_file_but_keeps_redis_persist() {
     );
     let loaded = load_config_from_sources(ConfigSources {
         cli_path: Some(file_path.clone()),
-        redis: Some(redis),
+        redis: Some(redis.clone()),
         default_path: PathBuf::from("config.json"),
     })
     .await
     .unwrap();
 
-    assert_eq!(loaded.config.port, 3333);
+    assert_eq!(loaded.config.port, Config::default().port);
     assert!(matches!(loaded.persist, ConfigPersist::Redis(_)));
+
+    // Missing Redis key is initialized with the default config.
+    let seeded = redis.get().await.unwrap().expect("redis key should be seeded");
+    let seeded_config: Config = serde_json::from_str(&seeded).unwrap();
+    assert_eq!(seeded_config.port, Config::default().port);
+
     let _ = fs::remove_dir_all(file_path.parent().unwrap());
 }
 

@@ -1,11 +1,14 @@
 use serde_json::Value;
 
 use crate::{
-    config::ClaudeConfig, error::ProxyError, middleware::headers::{apply_map_headers, merge_headers}, protocol,
+    config::ClaudeConfig, error::ProxyError, protocol,
     provider::types::ProviderType,
 };
 
-use super::{TypedSendRequest, UpstreamResponse, collect_response, reqwest_headers};
+use super::{
+    TypedSendRequest, UpstreamResponse, collect_response,
+    http::{api_key_headers, post_json},
+};
 
 #[derive(Clone)]
 pub(super) struct ClaudeProvider;
@@ -28,25 +31,26 @@ impl ClaudeProvider {
         &self,
         request: TypedSendRequest<'_, ClaudeConfig>,
     ) -> Result<UpstreamResponse, ProxyError> {
-        let mut headers = merge_headers(
+        let headers = api_key_headers(
             request.forwarded_headers,
             &[
                 ("content-type", "application/json".to_string()),
                 ("x-api-key", request.config.base.api_key.clone()),
                 ("anthropic-version", "2023-06-01".to_string()),
             ],
+            &request.config.base.headers,
         );
-        apply_map_headers(&mut headers, &request.config.base.headers);
-        let resp = request
-            .client
-            .post(format!(
+        let resp = post_json(
+            request.client,
+            format!(
                 "{}/v1/messages",
                 request.config.base.base_url.trim_end_matches('/')
-            ))
-            .headers(reqwest_headers(&headers)?)
-            .json(&request.request)
-            .send()
-            .await?;
+            ),
+            &headers,
+            &request.request,
+        )?
+        .send()
+        .await?;
         collect_response(resp, request.is_streaming).await
     }
 }

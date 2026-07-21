@@ -3,6 +3,7 @@ mod codex;
 mod gemini;
 mod grok;
 pub mod oauth;
+mod http;
 mod openai;
 
 pub mod executor;

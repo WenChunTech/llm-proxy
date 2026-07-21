@@ -173,3 +173,22 @@ function normalizeModelAliases(value: unknown): Record<string, string> {
       .filter(([alias, target]) => alias && target),
   )
 }
+
+export function filterModelAliases(
+  value: Record<string, string> | undefined,
+  availableModels: string[],
+) {
+  const availableModelSet = new Set(availableModels)
+  return Object.fromEntries(
+    Object.entries(value ?? {})
+      .map(([alias, target]) => [alias.trim(), target.trim()] as const)
+      .filter(
+        ([alias, target]) =>
+          alias &&
+          target &&
+          alias !== target &&
+          availableModelSet.has(alias) &&
+          availableModelSet.has(target),
+      ),
+  )
+}

@@ -4,6 +4,8 @@ use bytes::Bytes;
 use serde_json::Value;
 use tokio::time::{Duration, sleep};
 
+pub use crate::retry::should_attempt;
+
 use crate::{
     error::ProxyError,
     middleware::headers::{apply_map_headers, merge_headers},
@@ -124,92 +126,148 @@ pub async fn execute_image(
 
     rotate_attempt_targets(&mut targets, state.provider_cursor(&request.model).await);
     let mut retry_budget = 0usize;
-    let mut last_result: Option<ExecuteResult> = None;
-    let mut last_error: Option<ProxyError> = None;
+    match run_provider_attempts(
+        &request.model,
+        snapshot.config.retry.max_retries,
+        &snapshot.config,
+        &targets,
+        &mut retry_budget,
+        "image",
+        |target, _target_attempt| {
+            let request = request.clone();
+            let target = target.clone();
+            async move {
+                let result = try_image_target(state, &request, &target).await?;
+                if result.response.is_success() {
+                    state
+                        .record_provider_success(&request.model, provider_cursor(&target))
+                        .await;
+                }
+                Ok(result)
+            }
+        },
+    )
+    .await?
+    {
+        AttemptLoopResult::Success(result) => Ok(result),
+        AttemptLoopResult::Exhausted {
+            last_result: Some(result),
+            ..
+        } => Ok(result),
+        AttemptLoopResult::Exhausted {
+            last_error: Some(error),
+            ..
+        } => Err(error),
+        AttemptLoopResult::Exhausted { .. } => Err(ProxyError::AllProvidersExhausted),
+    }
+}
+
+
+
+
+#[derive(Debug)]
+enum AttemptLoopResult {
+    Success(ExecuteResult),
+    Exhausted {
+        last_result: Option<ExecuteResult>,
+        last_error: Option<ProxyError>,
+    },
+}
+
+async fn run_provider_attempts<F, Fut>(
+    model: &str,
+    max_retries: usize,
+    backoff_config: &crate::config::Config,
+    targets: &[AttemptTarget],
+    retry_budget: &mut usize,
+    log_label: &str,
+    mut attempt: F,
+) -> Result<AttemptLoopResult, ProxyError>
+where
+    F: FnMut(&AttemptTarget, usize) -> Fut,
+    Fut: std::future::Future<Output = Result<ExecuteResult, ProxyError>>,
+{
+    let mut last_result = None;
+    let mut last_error = None;
     let mut target_attempts: HashMap<ProviderCursor, usize> = HashMap::new();
 
     loop {
         let mut found_valid_provider = false;
-
-        for target in &targets {
-            if !should_attempt(retry_budget, snapshot.config.retry.max_retries) {
+        for target in targets {
+            if !should_attempt(*retry_budget, max_retries) {
                 break;
             }
 
             found_valid_provider = true;
-            retry_budget += 1;
-            let attempt = retry_budget;
-            let provider_cursor = provider_cursor(target);
-            let target_attempt = target_attempts.entry(provider_cursor.clone()).or_insert(0);
+            *retry_budget += 1;
+            let attempt_no = *retry_budget;
+            let cursor = provider_cursor(target);
+            let target_attempt = target_attempts.entry(cursor.clone()).or_insert(0);
             *target_attempt += 1;
+            let target_attempt = *target_attempt;
+
             tracing::info!(
-                model = %request.model,
+                model = %model,
                 provider = ?target.provider_type,
                 provider_index = target.provider_index,
                 config_index = target.config_index,
                 base_url = config_base_url(&target.config),
-                attempt,
-                provider_attempt = *target_attempt,
-                max_retries = snapshot.config.retry.max_retries,
-                "image provider attempt"
+                attempt = attempt_no,
+                provider_attempt = target_attempt,
+                max_retries,
+                "{log_label} provider attempt"
             );
 
-            match try_image_target(state, &request, target).await {
+            match attempt(target, target_attempt).await {
                 Ok(result) if result.response.is_success() => {
-                    state
-                        .record_provider_success(&request.model, provider_cursor)
-                        .await;
-                    return Ok(result);
+                    return Ok(AttemptLoopResult::Success(result));
                 }
                 Ok(result) => {
                     tracing::warn!(
-                        model = %request.model,
+                        model = %model,
                         provider = ?target.provider_type,
                         provider_index = target.provider_index,
                         config_index = target.config_index,
                         base_url = config_base_url(&target.config),
                         status_code = result.response.status(),
                         response_body = %result.response.body_text().unwrap_or_default(),
-                        "image provider returned non-success"
+                        "{log_label} provider returned non-success"
                     );
                     last_result = Some(result);
                 }
                 Err(error) => {
                     tracing::warn!(
-                        model = %request.model,
+                        model = %model,
                         provider = ?target.provider_type,
                         provider_index = target.provider_index,
                         config_index = target.config_index,
                         base_url = config_base_url(&target.config),
                         error = %error,
-                        "image provider attempt failed"
+                        "{log_label} provider attempt failed"
                     );
                     last_error = Some(error);
                 }
             }
         }
 
-        if !found_valid_provider || retry_budget >= snapshot.config.retry.max_retries {
+        if !found_valid_provider || *retry_budget >= max_retries {
             break;
         }
 
-        let delay_ms = backoff_delay_ms(retry_budget, &snapshot.config);
+        let delay_ms = backoff_delay_ms(*retry_budget, backoff_config);
         tracing::info!(
-            model = %request.model,
-            retry_budget,
+            model = %model,
+            retry_budget = *retry_budget,
             delay_ms,
-            "image retry backoff"
+            "{log_label} retry backoff"
         );
         sleep(Duration::from_millis(delay_ms)).await;
     }
 
-    if let Some(result) = last_result {
-        return Ok(result);
-    }
-    if let Some(error) = last_error {
-        return Err(error);
-    }
-    Err(ProxyError::AllProvidersExhausted)
+    Ok(AttemptLoopResult::Exhausted {
+        last_result,
+        last_error,
+    })
 }
 
 async fn execute_single_model(
@@ -222,108 +280,63 @@ async fn execute_single_model(
 ) -> Result<Option<ExecuteResult>, ProxyError> {
     let mut targets = snapshot.registry.attempt_targets(model);
     rotate_attempt_targets(&mut targets, state.provider_cursor(model).await);
-    let mut last_result = None;
-    let mut target_attempts: HashMap<ProviderCursor, usize> = HashMap::new();
 
-    loop {
-        let mut found_valid_provider = false;
-        for target in &targets {
-            if !should_attempt(*retry_budget, snapshot.config.retry.max_retries) {
-                break;
-            }
-
-            found_valid_provider = true;
-            *retry_budget += 1;
-            let attempt = *retry_budget;
-            let provider_cursor = provider_cursor(target);
-            let target_attempt = target_attempts.entry(provider_cursor.clone()).or_insert(0);
-            *target_attempt += 1;
-            let target_attempt = *target_attempt;
-            let auth_key = auth_cursor_key(target);
-            let auth_start_index = if let Some(key) = auth_key.as_ref() {
-                state.auth_cursor(key).await
-            } else {
-                None
-            };
-            tracing::info!(
-                model = %model,
-                provider = ?target.provider_type,
-                provider_index = target.provider_index,
-                config_index = target.config_index,
-                base_url = config_base_url(&target.config),
-                attempt,
-                provider_attempt = target_attempt,
-                max_retries = snapshot.config.retry.max_retries,
-                "provider attempt"
-            );
-
-            match try_target(
-                &state.providers,
-                state,
-                request,
-                model,
-                target,
-                auth_start_index,
-                target_attempt,
-            )
-            .await
-            {
-                Ok(result) if result.response.is_success() => {
-                    state.record_provider_success(model, provider_cursor).await;
-                    if let (Some(key), Some(auth_index)) = (auth_key, result.response.auth_index())
-                    {
+    match run_provider_attempts(
+        model,
+        snapshot.config.retry.max_retries,
+        &snapshot.config,
+        &targets,
+        retry_budget,
+        "model",
+        |target, target_attempt| {
+            let request = request.clone();
+            let model = model.to_string();
+            let target = target.clone();
+            async move {
+                let auth_key = auth_cursor_key(&target);
+                let auth_start_index = if let Some(key) = auth_key.as_ref() {
+                    state.auth_cursor(key).await
+                } else {
+                    None
+                };
+                let result = try_target(
+                    &state.providers,
+                    state,
+                    &request,
+                    &model,
+                    &target,
+                    auth_start_index,
+                    target_attempt,
+                )
+                .await?;
+                if result.response.is_success() {
+                    state
+                        .record_provider_success(&model, provider_cursor(&target))
+                        .await;
+                    if let (Some(key), Some(auth_index)) = (auth_key, result.response.auth_index()) {
                         state.record_auth_success(key, auth_index).await;
                     }
-                    return Ok(Some(result));
                 }
-                Ok(result) => {
-                    tracing::warn!(
-                        model = %model,
-                        provider = ?target.provider_type,
-                        provider_index = target.provider_index,
-                        config_index = target.config_index,
-                        base_url = config_base_url(&target.config),
-                        status_code = result.response.status(),
-                        response_body = %result.response.body_text().unwrap_or_default(),
-                        "provider returned non-success"
-                    );
-                    last_result = Some(result);
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        model = %model,
-                        provider = ?target.provider_type,
-                        provider_index = target.provider_index,
-                        config_index = target.config_index,
-                        base_url = config_base_url(&target.config),
-                        error = %error,
-                        "provider attempt failed"
-                    );
-                    *last_error = Some(error);
-                }
+                Ok(result)
             }
+        },
+    )
+    .await?
+    {
+        AttemptLoopResult::Success(result) => Ok(Some(result)),
+        AttemptLoopResult::Exhausted {
+            last_result,
+            last_error: exhausted_error,
+        } => {
+            if let Some(error) = exhausted_error {
+                *last_error = Some(error);
+            }
+            Ok(last_result)
         }
-
-        if !found_valid_provider || *retry_budget >= snapshot.config.retry.max_retries {
-            break;
-        }
-
-        let delay_ms = backoff_delay_ms(*retry_budget, &snapshot.config);
-        tracing::info!(
-            model = %model,
-            retry_budget = *retry_budget,
-            delay_ms,
-            "retry backoff"
-        );
-        sleep(Duration::from_millis(delay_ms)).await;
     }
-
-    Ok(last_result)
 }
 
-pub fn should_attempt(attempts: usize, max_retries: usize) -> bool {
-    attempts < max_retries
-}
+
 
 async fn try_target(
     providers: &Providers,

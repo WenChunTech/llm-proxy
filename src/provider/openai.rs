@@ -3,12 +3,14 @@ use serde_json::Value;
 use crate::{
     config::{OpenAiChatConfig, OpenAiResponsesConfig},
     error::ProxyError,
-    middleware::headers::{apply_map_headers, merge_headers},
     protocol,
     provider::types::ProviderType,
 };
 
-use super::{TypedSendRequest, UpstreamResponse, collect_response, reqwest_headers};
+use super::{
+    TypedSendRequest, UpstreamResponse, collect_response,
+    http::{bearer_json_headers, post_json},
+};
 
 #[derive(Clone)]
 pub(super) struct OpenAiChatProvider;
@@ -31,27 +33,22 @@ impl OpenAiChatProvider {
         &self,
         request: TypedSendRequest<'_, OpenAiChatConfig>,
     ) -> Result<UpstreamResponse, ProxyError> {
-        let mut headers = merge_headers(
+        let headers = bearer_json_headers(
             request.forwarded_headers,
-            &[
-                ("content-type", "application/json".to_string()),
-                (
-                    "authorization",
-                    format!("Bearer {}", request.config.base.api_key),
-                ),
-            ],
+            &request.config.base.api_key,
+            &request.config.base.headers,
         );
-        apply_map_headers(&mut headers, &request.config.base.headers);
-        let resp = request
-            .client
-            .post(format!(
+        let resp = post_json(
+            request.client,
+            format!(
                 "{}/chat/completions",
                 request.config.base.base_url.trim_end_matches('/')
-            ))
-            .headers(reqwest_headers(&headers)?)
-            .json(&request.request)
-            .send()
-            .await?;
+            ),
+            &headers,
+            &request.request,
+        )?
+        .send()
+        .await?;
         collect_response(resp, request.is_streaming).await
     }
 }
@@ -77,27 +74,22 @@ impl OpenAiResponsesProvider {
         &self,
         request: TypedSendRequest<'_, OpenAiResponsesConfig>,
     ) -> Result<UpstreamResponse, ProxyError> {
-        let mut headers = merge_headers(
+        let headers = bearer_json_headers(
             request.forwarded_headers,
-            &[
-                ("content-type", "application/json".to_string()),
-                (
-                    "authorization",
-                    format!("Bearer {}", request.config.base.api_key),
-                ),
-            ],
+            &request.config.base.api_key,
+            &request.config.base.headers,
         );
-        apply_map_headers(&mut headers, &request.config.base.headers);
-        let resp = request
-            .client
-            .post(format!(
+        let resp = post_json(
+            request.client,
+            format!(
                 "{}/responses",
                 request.config.base.base_url.trim_end_matches('/')
-            ))
-            .headers(reqwest_headers(&headers)?)
-            .json(&request.request)
-            .send()
-            .await?;
+            ),
+            &headers,
+            &request.request,
+        )?
+        .send()
+        .await?;
         collect_response(resp, request.is_streaming).await
     }
 }
