@@ -1883,8 +1883,23 @@ code {
 }
 
 .alias-add-row {
-  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr) auto;
+  grid-template-columns: auto minmax(200px, 1fr) auto minmax(200px, 1fr) auto;
   align-items: center;
+  padding: 8px;
+  border: 1px dashed color-mix(in srgb, var(--accent, #0d927d) 50%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #0d927d) 7%, transparent);
+}
+
+.alias-add-label {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent, #0d927d);
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .alias-add-row .select-control,
@@ -2838,7 +2853,10 @@ code {
     grid-template-columns: 1fr;
   }
 
-  .alias-add-row,
+  .alias-add-row {
+    grid-template-columns: auto 1fr auto 1fr auto;
+  }
+
   .alias-row {
     grid-template-columns: 1fr auto 1fr auto;
   }

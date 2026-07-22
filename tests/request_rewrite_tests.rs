@@ -112,10 +112,106 @@ fn grok_rewrite_only_when_source_already_responses() {
         .iter()
         .filter_map(|t| t.get("type").and_then(Value::as_str))
         .collect();
-    assert_eq!(types, vec!["function", "function", "web_search"]);
+    assert_eq!(types, vec!["function", "function", "web_search", "x_search"]);
     for tool in tools {
+        if tool.get("type").and_then(Value::as_str) == Some("function") {
+            // function tools are not rewritten for external_web_access
+            continue;
+        }
         assert!(tool.get("external_web_access").is_none());
     }
+}
+
+#[test]
+fn grok_skips_dialect_rewrite_when_endpoint_is_not_wire() {
+    let providers = Providers::new();
+    // Chat endpoint protocol != Grok wire (Responses) → convert only, no rewrite.
+    let body = json!({
+        "model": "grok-4.5",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "parameters": {"type": "object", "properties": {}}
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "apply_patch",
+                    "parameters": {"type": "object", "properties": {}}
+                }
+            }
+        ]
+    });
+
+    let out = providers
+        .prepare_request(ProviderType::Grok, body, ProviderType::Chat, true)
+        .expect("prepare_request");
+
+    assert_eq!(out["stream"], true);
+    // Converted toward Responses (no Chat `messages` required; stream set by Grok profile).
+    let tools = out.get("tools").and_then(Value::as_array).expect("tools");
+    // Grok rewrite would inject bare `x_search` whenever tools are present.
+    assert!(
+        !tools
+            .iter()
+            .any(|tool| tool.get("type").and_then(Value::as_str) == Some("x_search")),
+        "cross-protocol entry must skip grok dialect rewrite: {tools:?}"
+    );
+}
+
+#[test]
+fn gemini_endpoint_to_grok_converts_but_skips_rewrite() {
+    let providers = Providers::new();
+    let body = json!({
+        "model": "gemini-2.5-pro",
+        "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+        "tools": [{
+            "functionDeclarations": [{
+                "name": "read_file",
+                "description": "read a file",
+                "parameters": {"type": "object", "properties": {}}
+            }]
+        }]
+    });
+
+    let out = providers
+        .prepare_request(ProviderType::Grok, body, ProviderType::Gemini, true)
+        .expect("prepare_request");
+
+    assert_eq!(out["stream"], true);
+    // Converted body should no longer be pure Gemini `contents` shape for upstream wire.
+    // If convert produced tools, rewrite would inject x_search — assert it did not.
+    if let Some(tools) = out.get("tools").and_then(Value::as_array) {
+        assert!(
+            !tools
+                .iter()
+                .any(|tool| tool.get("type").and_then(Value::as_str) == Some("x_search")),
+            "gemini endpoint + grok must skip dialect rewrite: {tools:?}"
+        );
+    }
+}
+
+#[test]
+fn codex_skips_dialect_rewrite_when_endpoint_is_not_wire() {
+    let providers = Providers::new();
+    let body = json!({
+        "model": "codex",
+        "messages": [{"role": "user", "content": "hi"}],
+        "temperature": 0.5
+    });
+
+    let out = providers
+        .prepare_request(ProviderType::Codex, body, ProviderType::Chat, false)
+        .expect("prepare_request");
+
+    assert_eq!(out["stream"], false);
+    // Codex rewrite would strip temperature and force store=false.
+    assert_eq!(out.get("temperature"), Some(&json!(0.5)));
+    assert!(out.get("store").is_none());
 }
 
 #[test]
@@ -150,7 +246,7 @@ fn grok_dialect_rewrite_expands_and_filters_tools() {
     let out = rewrite_request(ProviderType::Grok, body).unwrap();
     let tools = out.get("tools").and_then(Value::as_array).unwrap();
     let types: Vec<_> = tools.iter().filter_map(tool_type).collect();
-    assert_eq!(types, vec!["function", "function", "web_search"]);
+    assert_eq!(types, vec!["function", "function", "web_search", "x_search"]);
     let names: Vec<_> = tools.iter().filter_map(tool_name).collect();
     assert!(names.contains(&"read_file"));
     assert!(names.contains(&"run_shell"));
@@ -231,7 +327,8 @@ fn rewrite_helpers_via_grok_profile_expand_namespace() {
 
     let out = rewrite_request(ProviderType::Grok, body).unwrap();
     let tools = out.get("tools").and_then(Value::as_array).unwrap();
-    assert_eq!(tools.len(), 3);
+    // expanded nested tools + injected x_search
+    assert_eq!(tools.len(), 4);
     assert!(tools.iter().all(|t| tool_type(t) != Some("namespace")));
     let names: HashSet<_> = tools.iter().filter_map(tool_name).collect();
     assert_eq!(names, HashSet::from(["read_file", "open", "click"]));
@@ -346,7 +443,8 @@ fn grok_profile_adapts_openai_web_search_to_xai_responses_shape() {
 
     let out = rewrite_request(ProviderType::Grok, body).unwrap();
     let tools = out.get("tools").and_then(Value::as_array).unwrap();
-    assert_eq!(tools.len(), 4);
+    // 3 web_search + 1 function + injected bare x_search
+    assert_eq!(tools.len(), 5);
 
     let web0 = &tools[0];
     assert_eq!(web0["type"], "web_search");
@@ -388,6 +486,9 @@ fn grok_profile_adapts_openai_web_search_to_xai_responses_shape() {
     // function tools are left alone (including unknown fields)
     assert_eq!(tools[3]["name"], "echo");
     assert_eq!(tools[3]["external_web_access"], false);
+
+    // bare x_search is injected when missing
+    assert_eq!(tools[4], json!({"type": "x_search"}));
 }
 
 #[test]
@@ -414,7 +515,8 @@ fn grok_maps_openai_search_content_types_image_to_enable_image_search() {
 
     let out = rewrite_request(ProviderType::Grok, body).unwrap();
     let tools = out.get("tools").and_then(Value::as_array).unwrap();
-    assert_eq!(tools.len(), 3);
+    // 3 web_search + injected bare x_search
+    assert_eq!(tools.len(), 4);
 
     assert_eq!(tools[0]["type"], "web_search");
     assert_eq!(tools[0]["enable_image_search"], true);
@@ -426,6 +528,126 @@ fn grok_maps_openai_search_content_types_image_to_enable_image_search() {
 
     assert!(tools[2].get("enable_image_search").is_none());
     assert!(tools[2].get("search_content_types").is_none());
+
+    assert_eq!(tools[3], json!({"type": "x_search"}));
+}
+
+
+#[test]
+fn grok_profile_injects_x_search_when_tools_present() {
+    let body = json!({
+        "model": "grok-4.5",
+        "input": [{"role": "user", "content": "hi"}],
+        "tools": [
+            {"type": "function", "name": "echo", "parameters": {"type": "object"}}
+        ]
+    });
+
+    let out = rewrite_request(ProviderType::Grok, body).unwrap();
+    let tools = out.get("tools").and_then(Value::as_array).unwrap();
+    assert_eq!(tools.len(), 2);
+    assert_eq!(tools[0]["name"], "echo");
+    assert_eq!(tools[1], json!({"type": "x_search"}));
+}
+
+#[test]
+fn grok_profile_does_not_create_tools_only_for_x_search() {
+    let body = json!({
+        "model": "grok-4.5",
+        "input": [{"role": "user", "content": "hi"}]
+    });
+
+    let out = rewrite_request(ProviderType::Grok, body).unwrap();
+    assert!(out.get("tools").is_none());
+}
+
+#[test]
+fn grok_profile_does_not_duplicate_existing_x_search() {
+    let body = json!({
+        "tools": [
+            {
+                "type": "x_search",
+                "allowed_x_handles": ["elonmusk"]
+            }
+        ]
+    });
+
+    let out = rewrite_request(ProviderType::Grok, body).unwrap();
+    let tools = out.get("tools").and_then(Value::as_array).unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["type"], "x_search");
+    assert_eq!(tools[0]["allowed_x_handles"], json!(["elonmusk"]));
+}
+
+#[test]
+fn grok_profile_adapts_x_search_to_xai_responses_shape() {
+    // Matches https://docs.x.ai/developers/tools/x-search Responses examples.
+    let body = json!({
+        "model": "grok-4.5",
+        "input": [{"role": "user", "content": "hi"}],
+        "tools": [
+            {
+                "type": "x_search",
+                // camelCase AI SDK aliases
+                "allowedXHandles": [
+                    "a","b","c","d","e","f","g","h","i","j",
+                    "k","l","m","n","o","p","q","r","s","t","u"
+                ],
+                "excludedXHandles": ["spam"],
+                "fromDate": "2025-10-01",
+                "toDate": "2025-10-10",
+                "enableImageUnderstanding": true,
+                "enableVideoUnderstanding": false,
+                "unknown_field": true
+            },
+            {
+                // both lists present with snake_case: keep allowed only
+                "type": "x_search",
+                "allowed_x_handles": ["keep_me"],
+                "excluded_x_handles": ["drop_me"],
+                "from_date": "2025-01-01"
+            },
+            {
+                // canonical key wins over alias
+                "type": "x_search",
+                "allowed_x_handles": ["canonical"],
+                "allowedXHandles": ["alias"]
+            }
+        ]
+    });
+
+    let out = rewrite_request(ProviderType::Grok, body).unwrap();
+    let tools = out.get("tools").and_then(Value::as_array).unwrap();
+    assert_eq!(tools.len(), 3);
+
+    let x0 = &tools[0];
+    assert_eq!(x0["type"], "x_search");
+    assert!(x0.get("allowedXHandles").is_none());
+    assert!(x0.get("excludedXHandles").is_none());
+    assert!(x0.get("fromDate").is_none());
+    assert!(x0.get("toDate").is_none());
+    assert!(x0.get("enableImageUnderstanding").is_none());
+    assert!(x0.get("enableVideoUnderstanding").is_none());
+    assert!(x0.get("unknown_field").is_none());
+    // max 20 handles; prefer allowed over excluded
+    assert_eq!(
+        x0["allowed_x_handles"].as_array().unwrap().len(),
+        20
+    );
+    assert!(x0.get("excluded_x_handles").is_none());
+    assert_eq!(x0["from_date"], "2025-10-01");
+    assert_eq!(x0["to_date"], "2025-10-10");
+    assert_eq!(x0["enable_image_understanding"], true);
+    assert_eq!(x0["enable_video_understanding"], false);
+
+    let x1 = &tools[1];
+    assert_eq!(x1["allowed_x_handles"], json!(["keep_me"]));
+    assert!(x1.get("excluded_x_handles").is_none());
+    assert_eq!(x1["from_date"], "2025-01-01");
+
+    let x2 = &tools[2];
+    assert_eq!(x2["allowed_x_handles"], json!(["canonical"]));
+    assert!(x2.get("allowedXHandles").is_none());
 }
 
 #[test]

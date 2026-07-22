@@ -2,10 +2,10 @@
 //!
 //! Pipeline rules:
 //! - Convert only when the client protocol differs from the upstream wire protocol.
-//! - Rewrite only when the upstream provider declares a dialect profile.
+//! - Rewrite only when the upstream provider declares a dialect profile *and*
+//!   the request endpoint protocol already matches that wire protocol.
+//! - Cross-protocol entry paths convert to wire shape but skip dialect rewrite.
 //! - If neither is needed, the body is left unchanged (aside from common flags).
-//! - When both are needed, convert always runs before rewrite so dialect rules
-//!   see a wire-shaped body regardless of entry endpoint.
 
 mod codex;
 mod grok;
@@ -22,7 +22,8 @@ type RewriteFn = fn(Value) -> Result<Value, ProxyError>;
 struct ProviderRequestProfile {
     /// Protocol shape expected by the upstream HTTP API.
     wire: ProviderType,
-    /// Vendor dialect rewrite applied only after the body is wire-shaped.
+    /// Vendor dialect rewrite applied only when the entry endpoint already
+    /// matches this wire protocol (no cross-protocol convert on this path).
     rewrite: Option<RewriteFn>,
     /// Whether this provider accepts a top-level `stream` flag.
     sets_stream: bool,
@@ -67,7 +68,8 @@ fn profile_for(provider: ProviderType) -> ProviderRequestProfile {
 ///
 /// Steps (each optional):
 /// 1. `convert` when `source != upstream.wire`
-/// 2. `rewrite` when the upstream profile has a dialect
+/// 2. `rewrite` when the upstream profile has a dialect *and*
+///    `source == upstream.wire` (endpoint matches provider request protocol)
 /// 3. common flags (`stream`, …)
 pub fn prepare_request(
     upstream: ProviderType,
@@ -77,7 +79,8 @@ pub fn prepare_request(
 ) -> Result<Value, ProxyError> {
     let profile = profile_for(upstream);
     let need_convert = source != profile.wire;
-    let need_rewrite = profile.rewrite.is_some();
+    // Dialect rewrite only when the client already speaks the wire protocol.
+    let need_rewrite = profile.rewrite.is_some() && source == profile.wire;
 
     tracing::debug!(
         upstream = ?upstream,
@@ -92,7 +95,9 @@ pub fn prepare_request(
         body = protocol::convert_request(body, source, profile.wire)?;
     }
 
-    if let Some(rewrite) = profile.rewrite {
+    if need_rewrite
+        && let Some(rewrite) = profile.rewrite
+    {
         body = rewrite(body)?;
     }
 

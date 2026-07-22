@@ -1,9 +1,11 @@
 //! Grok Responses dialect rewrite.
 //!
 //! Wire protocol is OpenAI Responses; xAI only accepts a subset of tool shapes
-//! and `web_search` parameters. See https://docs.x.ai/developers/tools/web-search
+//! and search parameters. See:
+//! - https://docs.x.ai/developers/tools/web-search
+//! - https://docs.x.ai/developers/tools/x-search
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::error::ProxyError;
 
@@ -12,7 +14,7 @@ use super::helpers::{
 };
 
 /// Grok dialect: expand namespaces, normalize tool aliases, allowlist tools,
-/// and adapt `web_search` to the xAI Responses shape.
+/// adapt search tools to the xAI Responses shape, and ensure `x_search`.
 pub(super) fn rewrite(mut body: Value) -> Result<Value, ProxyError> {
     expand_namespace_tools(&mut body)?;
     map_tool_types(
@@ -40,6 +42,8 @@ pub(super) fn rewrite(mut body: Value) -> Result<Value, ProxyError> {
         ],
     )?;
     adapt_web_search_tools(&mut body)?;
+    adapt_x_search_tools(&mut body)?;
+    ensure_x_search_tool(&mut body)?;
     Ok(body)
 }
 
@@ -151,5 +155,125 @@ fn adapt_web_search_tools(body: &mut Value) -> Result<(), ProxyError> {
         }
     }
 
+    Ok(())
+}
+
+/// Normalize `x_search` tools to the xAI Responses shape.
+///
+/// Per https://docs.x.ai/developers/tools/x-search :
+/// - top-level: `allowed_x_handles` / `excluded_x_handles` (max 20, mutually exclusive)
+/// - `from_date` / `to_date` (ISO8601, e.g. `"YYYY-MM-DD"`)
+/// - `enable_image_understanding` / `enable_video_understanding`
+/// - bare `{"type":"x_search"}` is valid
+///
+/// CamelCase aliases from Vercel AI SDK (`allowedXHandles`, `fromDate`, …) are
+/// folded into the documented snake_case keys. Unknown fields are dropped.
+fn adapt_x_search_tools(body: &mut Value) -> Result<(), ProxyError> {
+    const MAX_HANDLES: usize = 20;
+    const KEEP_FIELDS: &[&str] = &[
+        "type",
+        "allowed_x_handles",
+        "excluded_x_handles",
+        "from_date",
+        "to_date",
+        "enable_image_understanding",
+        "enable_video_understanding",
+    ];
+    // AI SDK / JS clients often send camelCase.
+    const ALIASES: &[(&str, &str)] = &[
+        ("allowedXHandles", "allowed_x_handles"),
+        ("excludedXHandles", "excluded_x_handles"),
+        ("fromDate", "from_date"),
+        ("toDate", "to_date"),
+        ("enableImageUnderstanding", "enable_image_understanding"),
+        ("enableVideoUnderstanding", "enable_video_understanding"),
+    ];
+
+    let Some(tools) = tools_array_mut(body)? else {
+        return Ok(());
+    };
+
+    for tool in tools.iter_mut() {
+        let Some(obj) = tool.as_object_mut() else {
+            continue;
+        };
+        if obj.get("type").and_then(Value::as_str) != Some("x_search") {
+            continue;
+        }
+
+        for (from, to) in ALIASES {
+            if obj.contains_key(*to) {
+                // Canonical key wins; drop the alias.
+                if obj.remove(*from).is_some() {
+                    tracing::debug!(
+                        from = %from,
+                        to = %to,
+                        "dropped aliased x_search field; canonical key already present"
+                    );
+                }
+                continue;
+            }
+            if let Some(value) = obj.remove(*from) {
+                tracing::debug!(from = %from, to = %to, "mapped x_search field alias");
+                obj.insert((*to).to_string(), value);
+            }
+        }
+
+        for key in ["allowed_x_handles", "excluded_x_handles"] {
+            if let Some(Value::Array(handles)) = obj.get_mut(key)
+                && handles.len() > MAX_HANDLES
+            {
+                tracing::debug!(
+                    field = key,
+                    original_len = handles.len(),
+                    max = MAX_HANDLES,
+                    "truncating grok x_search handle list"
+                );
+                handles.truncate(MAX_HANDLES);
+            }
+        }
+
+        // xAI: allowed_x_handles and excluded_x_handles cannot be set together.
+        // Prefer allow-list when both are present.
+        if obj.contains_key("allowed_x_handles") && obj.contains_key("excluded_x_handles") {
+            tracing::debug!(
+                "grok x_search has both allowed_x_handles and excluded_x_handles; dropping excluded_x_handles"
+            );
+            obj.remove("excluded_x_handles");
+        }
+
+        let removed: Vec<String> = obj
+            .keys()
+            .filter(|k| !KEEP_FIELDS.contains(&k.as_str()))
+            .cloned()
+            .collect();
+        for key in removed {
+            obj.remove(&key);
+            tracing::debug!(field = %key, "removed unsupported grok x_search field");
+        }
+    }
+
+    Ok(())
+}
+
+/// Ensure a bare `x_search` tool is present on Grok rewrite requests.
+///
+/// Only injects when the client already sent a `tools` array (or one remains
+/// after allowlisting). Does not create a tools list on tool-less requests.
+/// Existing `x_search` entries (including parameterized ones) are left alone.
+fn ensure_x_search_tool(body: &mut Value) -> Result<(), ProxyError> {
+    let Some(tools) = tools_array_mut(body)? else {
+        return Ok(());
+    };
+
+    let has_x_search = tools.iter().any(|tool| {
+        tool.get("type").and_then(Value::as_str) == Some("x_search")
+    });
+    if has_x_search {
+        return Ok(());
+    }
+
+    tracing::debug!("injecting bare x_search tool for grok rewrite");
+    tools.push(json!({ "type": "x_search" }));
     Ok(())
 }

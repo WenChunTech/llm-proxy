@@ -36,14 +36,32 @@ export function RoutingView({
   onReorderFallback: (sourceIndex: number, targetIndex: number) => void
   onAddFallbackModel: (model: string) => void
   onAddFallback: () => void
-  onUpdateModelAliases: (aliases: Record<string, string>) => void
+  onUpdateModelAliases: (
+    aliases:
+      | Record<string, string>
+      | ((current: Record<string, string>) => Record<string, string>),
+  ) => void
 }) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [draggedFallbackIndex, setDraggedFallbackIndex] = useState<number | null>(null)
   const [aliasSource, setAliasSource] = useState('')
   const [aliasTarget, setAliasTarget] = useState('')
   const configuredModelOptions = configuredModels.map((model) => ({ value: model, label: model }))
+  const aliasSourceOptions = [
+    { value: '', label: '选择别名模型（请求名）' },
+    ...configuredModelOptions,
+  ]
+  const aliasTargetOptions = [
+    { value: '', label: '选择原模型（实际路由）' },
+    ...configuredModelOptions,
+  ]
   const aliasRows = Object.entries(modelAliases).sort(([a], [b]) => a.localeCompare(b))
+  const canAddAlias =
+    Boolean(aliasSource) &&
+    Boolean(aliasTarget) &&
+    aliasSource !== aliasTarget &&
+    !modelAliases[aliasSource] &&
+    configuredModels.length >= 2
   const selectableModelGroups = defaultPriority
     .map((kind) => ({
       kind,
@@ -52,28 +70,39 @@ export function RoutingView({
     .filter((group) => group.models.length)
 
   function addAlias() {
-    const alias = aliasSource || configuredModels[0] || ''
-    const target = aliasTarget || configuredModels.find((model) => model !== alias) || ''
+    const alias = aliasSource.trim()
+    const target = aliasTarget.trim()
     if (!alias || !target || alias === target || modelAliases[alias]) return
-    onUpdateModelAliases({ ...modelAliases, [alias]: target })
-    setAliasSource('')
-    setAliasTarget('')
+    let added = false
+    onUpdateModelAliases((current) => {
+      if (current[alias]) return current
+      added = true
+      return { ...current, [alias]: target }
+    })
+    if (added) {
+      setAliasSource('')
+      setAliasTarget('')
+    }
   }
 
   function updateAliasRow(previousAlias: string, nextAlias: string, target: string) {
     if (!nextAlias || !target || nextAlias === target) return
-    const nextAliases = { ...modelAliases }
-    if (previousAlias !== nextAlias) {
-      delete nextAliases[previousAlias]
-    }
-    nextAliases[nextAlias] = target
-    onUpdateModelAliases(nextAliases)
+    onUpdateModelAliases((current) => {
+      const nextAliases = { ...current }
+      if (previousAlias !== nextAlias) {
+        delete nextAliases[previousAlias]
+      }
+      nextAliases[nextAlias] = target
+      return nextAliases
+    })
   }
 
   function removeAlias(alias: string) {
-    const nextAliases = { ...modelAliases }
-    delete nextAliases[alias]
-    onUpdateModelAliases(nextAliases)
+    onUpdateModelAliases((current) => {
+      const nextAliases = { ...current }
+      delete nextAliases[alias]
+      return nextAliases
+    })
   }
 
   return (
@@ -207,12 +236,15 @@ export function RoutingView({
             <div><span className="eyebrow">MODEL ALIASES</span><h3>模型别名</h3></div>
             <span className="panel-caption">{aliasRows.length} 个别名</span>
           </div>
-          <p className="panel-description">原模型与别名模型都只能从当前已配置模型中选择。</p>
+          <p className="panel-description">
+            原模型与别名模型都只能从当前已配置模型中选择。下方列表才是已保存的别名；上方选好后需点击「添加」。
+          </p>
           <div className="alias-add-row">
+            <span className="alias-add-label">新增</span>
             <SelectControl
               mono
-              value={aliasSource || configuredModels[0] || ''}
-              options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: '暂无可选模型' }]}
+              value={aliasSource}
+              options={configuredModelOptions.length ? aliasSourceOptions : [{ value: '', label: '暂无可选模型' }]}
               onChange={setAliasSource}
               disabled={!configuredModelOptions.length}
               ariaLabel="选择别名模型（请求名）"
@@ -220,8 +252,8 @@ export function RoutingView({
             <span className="alias-arrow">→</span>
             <SelectControl
               mono
-              value={aliasTarget || configuredModels.find((model) => model !== (aliasSource || configuredModels[0])) || configuredModels[0] || ''}
-              options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: '暂无可选模型' }]}
+              value={aliasTarget}
+              options={configuredModelOptions.length ? aliasTargetOptions : [{ value: '', label: '暂无可选模型' }]}
               onChange={setAliasTarget}
               disabled={!configuredModelOptions.length}
               ariaLabel="选择原模型（实际路由）"
@@ -229,8 +261,16 @@ export function RoutingView({
             <button
               className="icon-button accent-button"
               type="button"
-              title="添加别名"
-              disabled={configuredModels.length < 2}
+              title={
+                !aliasSource || !aliasTarget
+                  ? '请先选择别名模型和原模型'
+                  : aliasSource === aliasTarget
+                    ? '别名不能与原模型相同'
+                    : modelAliases[aliasSource]
+                      ? '该别名已存在'
+                      : '添加别名'
+              }
+              disabled={!canAddAlias}
               onClick={addAlias}
             >
               <Icon name="plus" size={16} />

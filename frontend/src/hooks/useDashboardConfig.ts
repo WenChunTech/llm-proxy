@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   defaultPriority,
@@ -41,6 +41,16 @@ type PersistInput = {
   apiKey?: string
 }
 
+type ConfigSnapshot = {
+  providers: Provider[]
+  priority: ProviderKind[]
+  fallbacks: string[]
+  modelAliases: Record<string, string>
+  retry: RetryConfig
+  projectApiKey: string
+  accessKey: string
+}
+
 export function useDashboardConfig(setToast: (message: string) => void) {
   const [providers, setProviders] = useState<Provider[]>([])
   const [priority, setPriority] = useState<ProviderKind[]>(defaultPriority)
@@ -60,10 +70,28 @@ export function useDashboardConfig(setToast: (message: string) => void) {
   const [isSaving, setIsSaving] = useState(false)
   const [showApiKeyEditor, setShowApiKeyEditor] = useState(false)
 
-  const configExport = useMemo(
-    () => buildConfigExport(providers, priority, fallbacks, modelAliases, retry, projectApiKey, port),
-    [fallbacks, modelAliases, port, priority, projectApiKey, providers, retry],
-  )
+  const snapshotRef = useRef<ConfigSnapshot>({
+    providers: [],
+    priority: defaultPriority,
+    fallbacks: [],
+    modelAliases: {},
+    retry: { maxRetries: 5, backoffStepMs: 5000 },
+    projectApiKey: '',
+    accessKey: readStoredAccessKey(),
+  })
+  snapshotRef.current = {
+    providers,
+    priority,
+    fallbacks,
+    modelAliases,
+    retry,
+    projectApiKey,
+    accessKey,
+  }
+
+  const pendingPatchRef = useRef<PersistInput>({})
+  const saveChainRef = useRef(Promise.resolve())
+  const saveInflightRef = useRef(0)
 
   const applyPayload = useCallback((payload: DashboardPayload) => {
     setProviders(payload.providers.map(fromApiProvider))
@@ -118,57 +146,114 @@ export function useDashboardConfig(setToast: (message: string) => void) {
   }, [loadConfig])
 
   const persistConfig = useCallback(
-    async (next: PersistInput) => {
-      const sourceProviders = next.providers ?? providers
-      const nextProviders = dedupeProvidersForSave(sourceProviders)
-      const nextPriority = next.priority ?? priority
-      const nextFallbacks = next.fallbacks ?? fallbacks
-      const configuredModels = new Set(nextProviders.flatMap((provider) => provider.models))
-      const nextModelAliases = filterModelAliases(next.modelAliases ?? modelAliases, Array.from(configuredModels))
-      const nextRetry = next.retry ?? retry
-      const nextApiKey = next.apiKey ?? projectApiKey
-      if (nextProviders.length !== sourceProviders.length) {
-        setProviders(nextProviders)
-      }
+    (next: PersistInput) => {
+      pendingPatchRef.current = { ...pendingPatchRef.current, ...next }
+      saveInflightRef.current += 1
       setIsSaving(true)
-      try {
-        const response = await fetch('/api/config', {
-          method: 'PUT',
-          headers: apiAuthHeaders(accessKey, { 'content-type': 'application/json' }),
-          body: JSON.stringify({
-            providers: nextProviders.map(toApiProvider),
-            model_priority: nextPriority,
-            fallback_models: nextFallbacks,
-            model_aliases: nextModelAliases,
-            api_key: nextApiKey,
-            retry: {
-              max_retries: nextRetry.maxRetries,
-              backoff_step_ms: nextRetry.backoffStepMs,
-            },
-          }),
-        })
-        if (response.status === 401) {
-          setAuthStatus('login')
-          throw new Error('unauthorized')
+
+      const flush = async () => {
+        try {
+          while (Object.keys(pendingPatchRef.current).length > 0) {
+            const patch = pendingPatchRef.current
+            pendingPatchRef.current = {}
+            const latest = snapshotRef.current
+
+            const sourceProviders = patch.providers ?? latest.providers
+            // Only dedupe when the caller is intentionally rewriting providers.
+            // Deduping on every alias/fallback save can drop models and aliases.
+            const nextProviders =
+              patch.providers !== undefined
+                ? dedupeProvidersForSave(sourceProviders)
+                : sourceProviders
+            const nextPriority = patch.priority ?? latest.priority
+            const nextFallbacks = patch.fallbacks ?? latest.fallbacks
+            const configuredModelList = Array.from(
+              new Set(nextProviders.flatMap((provider) => provider.models)),
+            )
+            const nextModelAliases = filterModelAliases(
+              patch.modelAliases ?? latest.modelAliases,
+              configuredModelList,
+            )
+            const nextRetry = patch.retry ?? latest.retry
+            const nextApiKey = patch.apiKey ?? latest.projectApiKey
+
+            if (patch.providers !== undefined && nextProviders.length !== sourceProviders.length) {
+              setProviders(nextProviders)
+              snapshotRef.current = { ...snapshotRef.current, providers: nextProviders }
+            }
+            if (patch.modelAliases !== undefined) {
+              setModelAliases(nextModelAliases)
+              snapshotRef.current = { ...snapshotRef.current, modelAliases: nextModelAliases }
+            }
+
+            try {
+              const response = await fetch('/api/config', {
+                method: 'PUT',
+                headers: apiAuthHeaders(latest.accessKey, { 'content-type': 'application/json' }),
+                body: JSON.stringify({
+                  providers: nextProviders.map(toApiProvider),
+                  model_priority: nextPriority,
+                  fallback_models: nextFallbacks,
+                  model_aliases: nextModelAliases,
+                  api_key: nextApiKey,
+                  retry: {
+                    max_retries: nextRetry.maxRetries,
+                    backoff_step_ms: nextRetry.backoffStepMs,
+                  },
+                }),
+              })
+              if (response.status === 401) {
+                setAuthStatus('login')
+                throw new Error('unauthorized')
+              }
+              if (!response.ok) throw new Error(await response.text())
+              const payload = (await response.json()) as DashboardPayload
+
+              snapshotRef.current = {
+                ...snapshotRef.current,
+                providers: nextProviders,
+                priority: nextPriority,
+                fallbacks: nextFallbacks,
+                modelAliases: nextModelAliases,
+                retry: nextRetry,
+                projectApiKey: nextApiKey,
+              }
+
+              // A newer patch arrived while this request was in flight — save again.
+              if (Object.keys(pendingPatchRef.current).length > 0) {
+                continue
+              }
+
+              applyPayload(payload)
+              if (patch.apiKey !== undefined) {
+                persistAccessKey(nextApiKey)
+                setAccessKey(nextApiKey)
+                setAuthInput(nextApiKey)
+                setShowApiKeyEditor(false)
+                setAuthStatus('ready')
+              }
+              setToast('配置已保存')
+            } catch {
+              if (Object.keys(pendingPatchRef.current).length > 0) {
+                // Keep the failed patch fields so a follow-up save still includes them.
+                pendingPatchRef.current = { ...patch, ...pendingPatchRef.current }
+                continue
+              }
+              setToast('保存失败，请检查后端日志')
+            }
+          }
+        } finally {
+          saveInflightRef.current = Math.max(0, saveInflightRef.current - 1)
+          if (saveInflightRef.current === 0) {
+            setIsSaving(false)
+          }
         }
-        if (!response.ok) throw new Error(await response.text())
-        const payload = (await response.json()) as DashboardPayload
-        applyPayload(payload)
-        if (next.apiKey !== undefined) {
-          persistAccessKey(nextApiKey)
-          setAccessKey(nextApiKey)
-          setAuthInput(nextApiKey)
-          setShowApiKeyEditor(false)
-          setAuthStatus('ready')
-        }
-        setToast('配置已保存')
-      } catch {
-        setToast('保存失败，请检查后端日志')
-      } finally {
-        setIsSaving(false)
       }
+
+      saveChainRef.current = saveChainRef.current.then(flush, flush)
+      return saveChainRef.current
     },
-    [accessKey, applyPayload, fallbacks, modelAliases, priority, projectApiKey, providers, retry, setToast],
+    [applyPayload, setToast],
   )
 
   async function loginWithApiKey(event: FormEvent<HTMLFormElement>) {
@@ -238,6 +323,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
       provider.id === id ? { ...provider, enabled: !provider.enabled } : provider,
     )
     setProviders(nextProviders)
+    snapshotRef.current = { ...snapshotRef.current, providers: nextProviders }
     void persistConfig({ providers: nextProviders })
   }
 
@@ -249,6 +335,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
         )
       : [...providers, { ...editingProvider, id: `${editingProvider.kind}:${Date.now()}` }]
     setProviders(nextProviders)
+    snapshotRef.current = { ...snapshotRef.current, providers: nextProviders }
     void persistConfig({ providers: nextProviders })
     return true
   }
@@ -256,6 +343,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
   function deleteProvider(id: string) {
     const nextProviders = providers.filter((item) => item.id !== id)
     setProviders(nextProviders)
+    snapshotRef.current = { ...snapshotRef.current, providers: nextProviders }
     void persistConfig({ providers: nextProviders })
   }
 
@@ -276,6 +364,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     const nextProviders = reorderSameKindProviders(providers, sourceId, targetId)
     if (!nextProviders) return
     setProviders(nextProviders as Provider[])
+    snapshotRef.current = { ...snapshotRef.current, providers: nextProviders as Provider[] }
     void persistConfig({ providers: nextProviders as Provider[] })
   }
 
@@ -283,6 +372,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     const nextPriority = moveItemByAction(priority, index, action)
     if (!nextPriority) return
     setPriority(nextPriority)
+    snapshotRef.current = { ...snapshotRef.current, priority: nextPriority }
     void persistConfig({ priority: nextPriority })
   }
 
@@ -290,6 +380,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     const nextPriority = reorderItem(priority, sourceIndex, targetIndex)
     if (!nextPriority) return
     setPriority(nextPriority)
+    snapshotRef.current = { ...snapshotRef.current, priority: nextPriority }
     void persistConfig({ priority: nextPriority })
   }
 
@@ -297,6 +388,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     if (!model || fallbacks.includes(model)) return
     const nextFallbacks = [...fallbacks, model]
     setFallbacks(nextFallbacks)
+    snapshotRef.current = { ...snapshotRef.current, fallbacks: nextFallbacks }
     void persistConfig({ fallbacks: nextFallbacks })
   }
 
@@ -312,19 +404,31 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     if (!nextModels.length) return false
     const nextFallbacks = [...fallbacks, ...nextModels]
     setFallbacks(nextFallbacks)
+    snapshotRef.current = { ...snapshotRef.current, fallbacks: nextFallbacks }
     void persistConfig({ fallbacks: nextFallbacks })
     return true
   }
 
-  function updateModelAliases(nextAliases: Record<string, string>) {
-    const normalized = filterModelAliases(nextAliases, configuredModels)
+  function updateModelAliases(
+    nextAliases:
+      | Record<string, string>
+      | ((current: Record<string, string>) => Record<string, string>),
+  ) {
+    const current = snapshotRef.current.modelAliases
+    const resolved = typeof nextAliases === 'function' ? nextAliases(current) : nextAliases
+    const availableModels = Array.from(
+      new Set(snapshotRef.current.providers.flatMap((provider) => provider.models)),
+    )
+    const normalized = filterModelAliases(resolved, availableModels)
     setModelAliases(normalized)
+    snapshotRef.current = { ...snapshotRef.current, modelAliases: normalized }
     void persistConfig({ modelAliases: normalized })
   }
 
   function removeFallback(model: string) {
     const nextFallbacks = fallbacks.filter((item) => item !== model)
     setFallbacks(nextFallbacks)
+    snapshotRef.current = { ...snapshotRef.current, fallbacks: nextFallbacks }
     void persistConfig({ fallbacks: nextFallbacks })
   }
 
@@ -338,11 +442,25 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     const nextFallbacks = reorderItem(fallbacks, sourceIndex, targetIndex)
     if (!nextFallbacks) return
     setFallbacks(nextFallbacks)
+    snapshotRef.current = { ...snapshotRef.current, fallbacks: nextFallbacks }
     void persistConfig({ fallbacks: nextFallbacks })
   }
 
   function exportConfig() {
-    downloadJson('llm-proxy-config.json', configExport)
+    // Build from the latest snapshot so rapid alias edits are not lost to a stale memo.
+    const latest = snapshotRef.current
+    downloadJson(
+      'llm-proxy-config.json',
+      buildConfigExport(
+        latest.providers,
+        latest.priority,
+        latest.fallbacks,
+        latest.modelAliases,
+        latest.retry,
+        latest.projectApiKey,
+        port,
+      ),
+    )
   }
 
   async function importConfigFile(file: File) {
@@ -362,6 +480,11 @@ export function useDashboardConfig(setToast: (message: string) => void) {
       const nextAliases = { ...modelAliases, ...importedAliases }
       setProviders(nextProviders)
       setModelAliases(nextAliases)
+      snapshotRef.current = {
+        ...snapshotRef.current,
+        providers: nextProviders,
+        modelAliases: nextAliases,
+      }
       void persistConfig({ providers: nextProviders, modelAliases: nextAliases })
       setToast(`已导入 ${imported.length} 个提供商，${Object.keys(importedAliases).length} 个别名`)
     } catch {
