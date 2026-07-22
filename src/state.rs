@@ -140,6 +140,10 @@ impl AppState {
         self.cursors.write().await.auth.insert(key, auth_index);
     }
 
+    pub async fn clear_auth_cursor(&self, key: &AuthCursorKey) {
+        self.cursors.write().await.auth.remove(key);
+    }
+
     pub async fn cached_codex_auth(
         &self,
         key: &AuthCursorKey,

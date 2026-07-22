@@ -11,8 +11,8 @@ use crate::{
 use super::{
     TypedSendRequest, UpstreamResponse, collect_response_with_auth,
     oauth::{
-        DEFAULT_GROK_BASE_URL, grok_access_token, grok_oauth_base_url, responses_endpoint,
-        select_grok_auth,
+        DEFAULT_GROK_BASE_URL, SelectedCredential, grok_access_token, grok_oauth_base_url,
+        responses_endpoint, select_oauth_credential,
     },
     reqwest_headers,
 };
@@ -25,12 +25,17 @@ impl GrokProvider {
         &self,
         request: TypedSendRequest<'_, GrokConfig>,
     ) -> Result<UpstreamResponse, ProxyError> {
-        let api_key = request.config.base.api_key.trim();
-        let api_key = (!api_key.is_empty()).then_some(api_key);
         let provider_base_url = request.config.base.base_url.trim();
-        let (token, extra_headers, base_url, auth_index) = if let Some(api_key) = api_key {
-            (
-                api_key.to_string(),
+        let selected = select_oauth_credential(
+            &request.config.base.api_key,
+            &request.config.auth,
+            request.auth_start_index,
+            request.target_attempt,
+            "Grok",
+        )?;
+        let (token, extra_headers, base_url, auth_index) = match selected {
+            SelectedCredential::ApiKey { token } => (
+                token,
                 None,
                 if provider_base_url.is_empty() {
                     DEFAULT_GROK_BASE_URL.to_string()
@@ -38,41 +43,40 @@ impl GrokProvider {
                     provider_base_url.trim_end_matches('/').to_string()
                 },
                 None,
-            )
-        } else {
-            let (auth_index, mut auth) = select_grok_auth(
-                &request.config.auth,
-                request.auth_start_index,
-                request.target_attempt,
-            )?;
-            let auth_key = AuthCursorKey {
-                provider_type: ProviderType::Grok,
-                base_url: provider_base_url.trim_end_matches('/').to_string(),
-                config_index: request.config_index,
-            };
-            if let Some(state) = request.state
-                && let Some(cached_auth) = state.cached_grok_auth(&auth_key, auth_index).await
-            {
-                auth = cached_auth;
+            ),
+            SelectedCredential::Auth {
+                index: auth_index,
+                mut auth,
+            } => {
+                let auth_key = AuthCursorKey {
+                    provider_type: ProviderType::Grok,
+                    base_url: provider_base_url.trim_end_matches('/').to_string(),
+                    config_index: request.config_index,
+                };
+                if let Some(state) = request.state
+                    && let Some(cached_auth) = state.cached_grok_auth(&auth_key, auth_index).await
+                {
+                    auth = cached_auth;
+                }
+                let access_token = grok_access_token(request.client, &mut auth).await?;
+                if access_token.refreshed
+                    && let Some(state) = request.state
+                {
+                    state
+                        .record_grok_auth(&auth_key, auth_index, auth.clone())
+                        .await;
+                }
+                let base_url = grok_oauth_base_url(
+                    (!provider_base_url.is_empty()).then_some(provider_base_url),
+                    &auth,
+                );
+                (
+                    access_token.token,
+                    auth.headers.clone(),
+                    base_url,
+                    Some(auth_index),
+                )
             }
-            let access_token = grok_access_token(request.client, &mut auth).await?;
-            if access_token.refreshed
-                && let Some(state) = request.state
-            {
-                state
-                    .record_grok_auth(&auth_key, auth_index, auth.clone())
-                    .await;
-            }
-            let base_url = grok_oauth_base_url(
-                (!provider_base_url.is_empty()).then_some(provider_base_url),
-                &auth,
-            );
-            (
-                access_token.token,
-                auth.headers.clone(),
-                base_url,
-                Some(auth_index),
-            )
         };
         tracing::info!(
             provider = ?ProviderType::Grok,

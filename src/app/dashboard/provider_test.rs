@@ -11,15 +11,15 @@ use serde_json::{Value, json};
 use crate::{
     app::apply_headers,
     error::ProxyError,
-    provider::{UpstreamResponse, oauth, types::{HeaderMap, ProviderType}},
+    provider::{
+        UpstreamResponse,
+        credentials::credential_slot_count,
+        types::{AttemptTarget, HeaderMap, ProviderType},
+    },
     state::AppState,
 };
 
-use super::auth_helpers::auth_headers;
-use super::endpoints::build_provider_responses_endpoint;
-use super::types::{
-    DashboardProvider, ProviderTestRequest, ProviderTestResult, ProviderTestStreamResponse,
-};
+use super::types::{ProviderTestRequest, ProviderTestResult, ProviderTestStreamResponse};
 
 pub(super) async fn test_provider_model(
     state: &AppState,
@@ -44,54 +44,52 @@ pub(super) async fn test_provider_model(
         state
             .providers
             .prepare_request(provider_type, body, source_type, stream)?;
-    if matches!(provider_type, ProviderType::Codex | ProviderType::Grok)
-        && !request.provider.api_key.trim().is_empty()
-    {
-        return test_api_key_responses_provider(
-            &state.http,
-            &request.provider,
-            provider_request,
+    let config = request.provider.provider_config()?;
+    let attempt_count = provider_test_attempt_count(provider_type, &config);
+    let mut last_result = None;
+    let mut last_error = None;
+
+    for target_attempt in 1..=attempt_count {
+        match send_provider_test_attempt(
+            state,
+            provider_type,
+            &config,
+            provider_request.clone(),
             model,
             stream,
+            target_attempt,
         )
-        .await;
+        .await
+        {
+            Ok(upstream) => {
+                let status = upstream.status();
+                let body = collect_test_response_body(upstream).await?;
+                let raw_body = response_text(&body);
+                let body_preview = response_preview(&body);
+                let result = ProviderTestResult {
+                    ok: (200..300).contains(&status),
+                    status,
+                    provider: request.provider.kind.clone(),
+                    model: model.to_string(),
+                    stream,
+                    raw_body,
+                    body_preview,
+                };
+                if result.ok {
+                    return Ok(result);
+                }
+                last_result = Some(result);
+            }
+            Err(error) => {
+                last_error = Some(error);
+            }
+        }
     }
 
-    let config = request.provider.provider_config()?;
-    let headers = HeaderMap::new();
-    let upstream = tokio::time::timeout(
-        Duration::from_secs(30),
-        state.providers.send_request(crate::provider::SendRequest {
-            state: None,
-            client: &state.http,
-            is_streaming: stream,
-            provider_type,
-            request: provider_request,
-            config: &config,
-            config_index: 0,
-            forwarded_headers: &headers,
-            model,
-            auth_start_index: None,
-            target_attempt: 1,
-        }),
-    )
-    .await
-    .map_err(|_| ProxyError::Upstream("provider test timed out".to_string()))??;
-
-    let status = upstream.status();
-    let body = collect_test_response_body(upstream).await?;
-    let raw_body = response_text(&body);
-    let body_preview = response_preview(&body);
-
-    Ok(ProviderTestResult {
-        ok: (200..300).contains(&status),
-        status,
-        provider: request.provider.kind,
-        model: model.to_string(),
-        stream,
-        raw_body,
-        body_preview,
-    })
+    if let Some(result) = last_result {
+        return Ok(result);
+    }
+    Err(last_error.unwrap_or(ProxyError::AllProvidersExhausted))
 }
 
 pub(super) async fn stream_provider_model(
@@ -118,21 +116,52 @@ pub(super) async fn stream_provider_model(
             .providers
             .prepare_request(provider_type, body, source_type, stream)?;
 
-    if matches!(provider_type, ProviderType::Codex | ProviderType::Grok)
-        && !request.provider.api_key.trim().is_empty()
-    {
-        return stream_api_key_responses_provider(
-            &state.http,
-            &request.provider,
-            provider_request,
+    let config = request.provider.provider_config()?;
+    let attempt_count = provider_test_attempt_count(provider_type, &config);
+    let mut last_response = None;
+    let mut last_error = None;
+
+    for target_attempt in 1..=attempt_count {
+        match send_provider_test_attempt(
+            state,
+            provider_type,
+            &config,
+            provider_request.clone(),
+            model,
             stream,
+            target_attempt,
         )
-        .await;
+        .await
+        {
+            Ok(upstream) if upstream.is_success() => {
+                return Ok(ProviderTestStreamResponse::Upstream(upstream));
+            }
+            Ok(upstream) => {
+                last_response = Some(upstream);
+            }
+            Err(error) => {
+                last_error = Some(error);
+            }
+        }
     }
 
-    let config = request.provider.provider_config()?;
+    if let Some(response) = last_response {
+        return Ok(ProviderTestStreamResponse::Upstream(response));
+    }
+    Err(last_error.unwrap_or(ProxyError::AllProvidersExhausted))
+}
+
+async fn send_provider_test_attempt(
+    state: &AppState,
+    provider_type: ProviderType,
+    config: &crate::config::ProviderConfig,
+    provider_request: Value,
+    model: &str,
+    stream: bool,
+    target_attempt: usize,
+) -> Result<UpstreamResponse, ProxyError> {
     let headers = HeaderMap::new();
-    let upstream = tokio::time::timeout(
+    tokio::time::timeout(
         Duration::from_secs(30),
         state.providers.send_request(crate::provider::SendRequest {
             state: None,
@@ -140,66 +169,35 @@ pub(super) async fn stream_provider_model(
             is_streaming: stream,
             provider_type,
             request: provider_request,
-            config: &config,
+            config,
             config_index: 0,
             forwarded_headers: &headers,
             model,
             auth_start_index: None,
-            target_attempt: 1,
+            target_attempt,
         }),
     )
     .await
-    .map_err(|_| ProxyError::Upstream("provider test timed out".to_string()))??;
-
-    Ok(ProviderTestStreamResponse::Upstream(upstream))
+    .map_err(|_| ProxyError::Upstream("provider test timed out".to_string()))?
 }
 
-async fn stream_api_key_responses_provider(
-    client: &reqwest::Client,
-    provider: &DashboardProvider,
-    body: Value,
-    stream: bool,
-) -> Result<ProviderTestStreamResponse, ProxyError> {
-    let endpoint = build_provider_responses_endpoint(&provider.base_url)?;
-    let api_key = provider.api_key.trim();
-    if api_key.is_empty() {
-        return Err(ProxyError::InvalidRequest(
-            "api_key is required".to_string(),
-        ));
-    }
-
-    let mut builder = client
-        .post(&endpoint)
-        .bearer_auth(api_key)
-        .header("content-type", "application/json")
-        .header(
-            "accept",
-            if stream {
-                "text/event-stream"
-            } else {
-                "application/json"
-            },
-        )
-        .timeout(Duration::from_secs(30))
-        .json(&body);
-    if provider.kind == "codex" {
-        builder = builder
-            .header("user-agent", oauth::CODEX_USER_AGENT)
-            .header("originator", "codex-tui");
-    }
-    builder = apply_provider_extra_headers(builder, provider);
-
-    let response = builder.send().await?;
-    let status = response.status().as_u16();
-    let headers = response_headers(response.headers());
-    Ok(ProviderTestStreamResponse::Direct {
-        status,
-        headers,
-        response,
-    })
+fn provider_test_attempt_count(
+    provider_type: ProviderType,
+    config: &crate::config::ProviderConfig,
+) -> usize {
+    let target = AttemptTarget {
+        provider_type,
+        provider_index: 0,
+        config_index: 0,
+        config: config.clone(),
+    };
+    credential_slot_count(&target)
 }
 
-pub(super) fn write_provider_test_stream_response(res: &mut Response, response: ProviderTestStreamResponse) {
+pub(super) fn write_provider_test_stream_response(
+    res: &mut Response,
+    response: ProviderTestStreamResponse,
+) {
     match response {
         ProviderTestStreamResponse::Upstream(upstream) => {
             apply_headers(res, upstream.headers());
@@ -218,97 +216,7 @@ pub(super) fn write_provider_test_stream_response(res: &mut Response, response: 
                 }
             }
         }
-        ProviderTestStreamResponse::Direct {
-            status,
-            headers,
-            response,
-        } => {
-            apply_headers(res, &headers);
-            res.status_code(StatusCode::from_u16(status).unwrap_or(StatusCode::OK));
-            if !headers.contains_key("content-type") {
-                res.headers_mut().insert(
-                    header::CONTENT_TYPE,
-                    HeaderValue::from_static("text/event-stream"),
-                );
-            }
-            let stream = response.bytes_stream().map_err(std::io::Error::other);
-            res.stream(stream);
-        }
     }
-}
-
-
-fn apply_provider_extra_headers(
-    mut builder: reqwest::RequestBuilder,
-    provider: &DashboardProvider,
-) -> reqwest::RequestBuilder {
-    // Auth headers first, then custom provider headers so custom wins on conflicts.
-    if matches!(provider.kind.as_str(), "codex" | "grok")
-        && let Some(headers) = auth_headers(provider.auth.as_ref())
-    {
-        for (name, value) in headers {
-            builder = builder.header(name, value);
-        }
-    }
-    for (name, value) in &provider.headers {
-        let value = value.trim();
-        if !value.is_empty() {
-            builder = builder.header(name, value);
-        }
-    }
-    builder
-}
-
-async fn test_api_key_responses_provider(
-    client: &reqwest::Client,
-    provider: &DashboardProvider,
-    body: Value,
-    model: &str,
-    stream: bool,
-) -> Result<ProviderTestResult, ProxyError> {
-    let endpoint = build_provider_responses_endpoint(&provider.base_url)?;
-    let api_key = provider.api_key.trim();
-    if api_key.is_empty() {
-        return Err(ProxyError::InvalidRequest(
-            "api_key is required".to_string(),
-        ));
-    }
-
-    let mut builder = client
-        .post(&endpoint)
-        .bearer_auth(api_key)
-        .header("content-type", "application/json")
-        .header(
-            "accept",
-            if stream {
-                "text/event-stream"
-            } else {
-                "application/json"
-            },
-        )
-        .timeout(Duration::from_secs(30))
-        .json(&body);
-    if provider.kind == "codex" {
-        builder = builder
-            .header("user-agent", oauth::CODEX_USER_AGENT)
-            .header("originator", "codex-tui");
-    }
-    builder = apply_provider_extra_headers(builder, provider);
-
-    let response = builder.send().await?;
-    let status = response.status().as_u16();
-    let body = response.bytes().await?;
-    let raw_body = response_text(&body);
-
-    Ok(ProviderTestResult {
-        ok: (200..300).contains(&status),
-        status,
-        provider: provider.kind.clone(),
-        model: model.to_string(),
-        stream,
-        raw_body,
-        body_preview: response_preview(&body),
-    })
 }
 
 async fn collect_test_response_body(response: UpstreamResponse) -> Result<Bytes, ProxyError> {
@@ -357,20 +265,7 @@ fn response_text(body: &[u8]) -> String {
     String::from_utf8_lossy(body).into_owned()
 }
 
-fn response_headers(headers: &reqwest::header::HeaderMap) -> HeaderMap {
-    headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_string(), value.to_string()))
-        })
-        .collect()
-}
-
 fn response_preview(body: &[u8]) -> String {
     let text = response_text(body);
     text.chars().take(500).collect()
 }
-

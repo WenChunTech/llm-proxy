@@ -67,7 +67,7 @@ export function FallbackModelModal({
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
+    <div className="llm-modal-backdrop" onMouseDown={onClose}>
       <form className="modal fallback-picker-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-heading">
           <div>

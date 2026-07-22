@@ -1,9 +1,10 @@
 mod claude;
 mod codex;
+pub mod credentials;
 mod gemini;
 mod grok;
-pub mod oauth;
 mod http;
+pub mod oauth;
 mod openai;
 mod request_rewrite;
 

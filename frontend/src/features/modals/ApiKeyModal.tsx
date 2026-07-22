@@ -22,7 +22,7 @@ export function ApiKeyModal({
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
+    <div className="llm-modal-backdrop" onMouseDown={onClose}>
       <form className="modal auth-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-heading">
           <div>

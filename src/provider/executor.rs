@@ -11,6 +11,9 @@ use crate::{
     middleware::headers::{apply_map_headers, merge_headers},
     provider::{
         Providers, SendRequest, UpstreamResponse,
+        credentials::{
+            coverage_attempt_budget, credential_coverage_attempts, credential_slot_count,
+        },
         types::{AttemptTarget, ProviderType},
     },
     retry::{backoff_delay_ms, fallback_chain},
@@ -69,7 +72,6 @@ pub async fn execute(
         });
     }
 
-    let mut retry_budget = 0usize;
     let mut last_result: Option<ExecuteResult> = None;
     let mut last_error: Option<ProxyError> = None;
 
@@ -82,15 +84,10 @@ pub async fn execute(
             );
         }
 
-        if let Some(result) = execute_single_model(
-            state,
-            snapshot,
-            &request,
-            model,
-            &mut retry_budget,
-            &mut last_error,
-        )
-        .await?
+        // Each model gets an independent attempt budget so fallback models are not
+        // starved after the primary model exhausts its coverage/max_retries.
+        if let Some(result) =
+            execute_single_model(state, snapshot, &request, model, &mut last_error).await?
         {
             if result.response.is_success() {
                 return Ok(result);
@@ -162,9 +159,6 @@ pub async fn execute_image(
     }
 }
 
-
-
-
 #[derive(Debug)]
 enum AttemptLoopResult {
     Success(ExecuteResult),
@@ -190,12 +184,20 @@ where
     let mut last_result = None;
     let mut last_error = None;
     let mut target_attempts: HashMap<ProviderCursor, usize> = HashMap::new();
+    // Shared attempt loop for every provider type (OpenAI/Claude/Gemini/Codex/Grok).
+    // Budget always covers every target/credential once; max_retries only raises it.
+    let coverage_attempts = credential_coverage_attempts(targets);
+    let attempt_limit = coverage_attempt_budget(targets, max_retries);
+    let mut round_index = 0usize;
 
     loop {
         let mut found_valid_provider = false;
         for target in targets {
-            if !should_attempt(*retry_budget, max_retries) {
+            if !should_attempt(*retry_budget, attempt_limit) {
                 break;
+            }
+            if *retry_budget < coverage_attempts && round_index >= credential_slot_count(target) {
+                continue;
             }
 
             found_valid_provider = true;
@@ -215,6 +217,8 @@ where
                 attempt = attempt_no,
                 provider_attempt = target_attempt,
                 max_retries,
+                coverage_attempts,
+                attempt_limit,
                 "{log_label} provider attempt"
             );
 
@@ -250,10 +254,11 @@ where
             }
         }
 
-        if !found_valid_provider || *retry_budget >= max_retries {
+        if !found_valid_provider || *retry_budget >= attempt_limit {
             break;
         }
 
+        round_index = round_index.saturating_add(1);
         let delay_ms = backoff_delay_ms(*retry_budget, backoff_config);
         tracing::info!(
             model = %model,
@@ -275,18 +280,18 @@ async fn execute_single_model(
     snapshot: &AppSnapshot,
     request: &ExecuteRequest,
     model: &str,
-    retry_budget: &mut usize,
     last_error: &mut Option<ProxyError>,
 ) -> Result<Option<ExecuteResult>, ProxyError> {
     let mut targets = snapshot.registry.attempt_targets(model);
     rotate_attempt_targets(&mut targets, state.provider_cursor(model).await);
+    let mut retry_budget = 0usize;
 
     match run_provider_attempts(
         model,
         snapshot.config.retry.max_retries,
         &snapshot.config,
         &targets,
-        retry_budget,
+        &mut retry_budget,
         "model",
         |target, target_attempt| {
             let request = request.clone();
@@ -313,8 +318,16 @@ async fn execute_single_model(
                     state
                         .record_provider_success(&model, provider_cursor(&target))
                         .await;
-                    if let (Some(key), Some(auth_index)) = (auth_key, result.response.auth_index()) {
-                        state.record_auth_success(key, auth_index).await;
+                    if let Some(key) = auth_key {
+                        match result.response.auth_index() {
+                            Some(auth_index) => {
+                                state.record_auth_success(key, auth_index).await;
+                            }
+                            // api_key success: clear cursor so next request starts at api_key first.
+                            None => {
+                                state.clear_auth_cursor(&key).await;
+                            }
+                        }
                     }
                 }
                 Ok(result)
@@ -335,8 +348,6 @@ async fn execute_single_model(
         }
     }
 }
-
-
 
 async fn try_target(
     providers: &Providers,
@@ -567,4 +578,114 @@ pub fn clean_image_base_url(url: &str) -> String {
         .unwrap_or_else(|| url.trim_end_matches('/'))
         .trim_end_matches('/')
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use crate::config::{
+        BaseProviderConfig, Config, GrokAuth, GrokConfig, OneOrMany, OpenAiChatConfig,
+        ProviderConfig,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn run_provider_attempts_covers_extra_credentials_before_repeating_single_slot_targets() {
+        let targets = vec![
+            AttemptTarget {
+                provider_type: ProviderType::Grok,
+                provider_index: 0,
+                config_index: 0,
+                config: ProviderConfig::Grok(GrokConfig {
+                    base: base_config("https://grok.example/v1", "sk-grok"),
+                    auth: OneOrMany::Many(vec![
+                        GrokAuth {
+                            access_token: Some("auth-a".to_string()),
+                            ..empty_grok_auth()
+                        },
+                        GrokAuth {
+                            access_token: Some("auth-b".to_string()),
+                            ..empty_grok_auth()
+                        },
+                    ]),
+                }),
+            },
+            AttemptTarget {
+                provider_type: ProviderType::Chat,
+                provider_index: 1,
+                config_index: 0,
+                config: ProviderConfig::OpenAiChat(OpenAiChatConfig {
+                    base: base_config("https://chat.example/v1", "sk-chat"),
+                }),
+            },
+        ];
+        let mut config = Config::default();
+        config.retry.backoff_step_ms = 0;
+        let attempts = Arc::new(Mutex::new(Vec::new()));
+        let mut retry_budget = 0usize;
+
+        let result =
+            run_provider_attempts("model", 1, &config, &targets, &mut retry_budget, "test", {
+                let attempts = Arc::clone(&attempts);
+                move |target, target_attempt| {
+                    let attempts = Arc::clone(&attempts);
+                    let provider_type = target.provider_type;
+                    async move {
+                        attempts
+                            .lock()
+                            .unwrap()
+                            .push((provider_type, target_attempt));
+                        Ok(ExecuteResult {
+                            provider_type,
+                            response: UpstreamResponse::NonStream {
+                                status: 500,
+                                headers: Default::default(),
+                                body: Bytes::new(),
+                                auth_index: None,
+                            },
+                        })
+                    }
+                }
+            })
+            .await
+            .unwrap();
+
+        assert!(matches!(result, AttemptLoopResult::Exhausted { .. }));
+        assert_eq!(
+            attempts.lock().unwrap().as_slice(),
+            &[
+                (ProviderType::Grok, 1),
+                (ProviderType::Chat, 1),
+                (ProviderType::Grok, 2),
+                (ProviderType::Grok, 3),
+            ],
+        );
+    }
+
+    fn base_config(base_url: &str, api_key: &str) -> BaseProviderConfig {
+        BaseProviderConfig {
+            enabled: true,
+            models: vec!["model".to_string()],
+            base_url: base_url.to_string(),
+            api_key: api_key.to_string(),
+            headers: Default::default(),
+        }
+    }
+
+    fn empty_grok_auth() -> GrokAuth {
+        GrokAuth {
+            access_token: None,
+            refresh_token: None,
+            id_token: None,
+            token_type: None,
+            expires_in: None,
+            expiry_date: None,
+            base_url: None,
+            token_endpoint: None,
+            headers: None,
+            disabled: None,
+        }
+    }
 }

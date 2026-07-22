@@ -353,7 +353,7 @@ export function ProviderModal({
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
+    <div className="llm-modal-backdrop" onMouseDown={onClose}>
       <form className="modal provider-modal" onSubmit={onSubmit} onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-heading"><div><span className="eyebrow">UPSTREAM CONFIG</span><h2>{isEditing ? '编辑提供商' : '添加提供商'}</h2></div><button className="icon-button" type="button" title="关闭" onClick={onClose}>×</button></div>
         <div className="provider-modal-layout">
@@ -456,7 +456,13 @@ export function ProviderModal({
                   onChange={(event) => updateAuthJson(event.target.value)}
                   placeholder='{"access_token":"..."} 或 [{"access_token":"..."}]'
                 />
-                {authError && <span className="model-sync-status muted-copy">{authError}</span>}
+                {authError ? (
+                  <span className="model-sync-status muted-copy">{authError}</span>
+                ) : (
+                  <span className="model-sync-status muted-copy">
+                    可与 API Key 同时配置；请求失败时会轮询 API Key 与全部 enabled auth
+                  </span>
+                )}
               </div>
             </section>
           )}
@@ -567,28 +573,24 @@ export function ProviderModal({
               <span className="eyebrow">TEST REQUEST</span>
               <h3>测试模型</h3>
             </div>
-            <div className="provider-test-grid">
-              <div className="field compact-field">
-                <span>模型</span>
-                <SelectControl
-                  mono
-                  value={testModel}
-                  options={
-                    testModelOptions.length
-                      ? testModelOptions.map((model) => ({ value: model, label: model }))
-                      : [{ value: '', label: '请先添加或同步模型' }]
-                  }
-                  onChange={setTestModel}
-                  disabled={!testModelOptions.length}
-                  ariaLabel="选择测试模型"
-                />
-              </div>
-              <label className="field compact-field prompt-field">
-                <span>提示词</span>
-                <textarea value={testPrompt} onChange={(event) => setTestPrompt(event.target.value)} placeholder="输入测试提示词" />
-              </label>
-              <div className="provider-test-actions">
-                <label className="stream-toggle">
+            <div className="provider-test-panel">
+              <div className="provider-test-toolbar">
+                <div className="field compact-field provider-test-model-field">
+                  <span>模型</span>
+                  <SelectControl
+                    mono
+                    value={testModel}
+                    options={
+                      testModelOptions.length
+                        ? testModelOptions.map((model) => ({ value: model, label: model }))
+                        : [{ value: '', label: '请先添加或同步模型' }]
+                    }
+                    onChange={setTestModel}
+                    disabled={!testModelOptions.length}
+                    ariaLabel="选择测试模型"
+                  />
+                </div>
+                <label className="stream-toggle provider-test-stream-toggle">
                   <input
                     type="checkbox"
                     checked={testStream}
@@ -596,50 +598,85 @@ export function ProviderModal({
                   />
                   <span>流式输出</span>
                 </label>
-                <button className="button button-secondary" type="button" disabled={testStatus === 'loading'} onClick={testCurrentModel}>
-                  <Icon name="play" size={15} />
-                  {testStatus === 'loading' ? '检测中' : '检测模型'}
-                </button>
-                <button className="button button-secondary" type="button" onClick={copyTestCurl}>
-                  <Icon name="copy" size={15} />
-                  复制 curl
-                </button>
-                {(testMessage || curlCopyStatus) && <span className={`test-status ${testStatus}`}>{curlCopyStatus || testMessage}</span>}
               </div>
-              {(testStatus === 'ok' || testStatus === 'error') && (
-                <div className="provider-test-enable-actions">
-                  <span className="provider-test-enable-label">
-                    当前状态：{provider.enabled ? '已启用' : '已禁用'}
-                    {testStatus === 'ok' ? ' · 检测通过，可启用提供商' : ' · 检测失败，可禁用提供商'}
-                  </span>
-                  <div className="provider-test-enable-buttons">
-                    <button
-                      className={`button button-secondary ${provider.enabled ? 'is-active-enable' : ''}`}
-                      type="button"
-                      disabled={provider.enabled}
-                      onClick={() => onChange({ ...provider, enabled: true })}
-                    >
-                      <Icon name="check" size={15} />
-                      启用
-                    </button>
-                    <button
-                      className={`button button-secondary ${!provider.enabled ? 'is-active-disable' : ''}`}
-                      type="button"
-                      disabled={!provider.enabled}
-                      onClick={() => onChange({ ...provider, enabled: false })}
-                    >
-                      禁用
-                    </button>
-                  </div>
+
+              <label className="field compact-field prompt-field">
+                <span>提示词</span>
+                <textarea
+                  value={testPrompt}
+                  onChange={(event) => setTestPrompt(event.target.value)}
+                  placeholder="输入测试提示词"
+                />
+              </label>
+
+              <div className="provider-test-actions">
+                <div className="provider-test-action-buttons">
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    disabled={testStatus === 'loading'}
+                    onClick={testCurrentModel}
+                  >
+                    <Icon name="play" size={15} />
+                    {testStatus === 'loading' ? '检测中' : '检测模型'}
+                  </button>
+                  <button className="button button-secondary" type="button" onClick={copyTestCurl}>
+                    <Icon name="copy" size={15} />
+                    复制 curl
+                  </button>
                 </div>
-              )}
-            </div>
-            <div className="raw-response-panel">
-              <div className="raw-response-heading">
-                <span>原始响应</span>
-                <small>{testRawData ? `${testRawData.length} chars` : testStream ? 'stream' : 'non-stream'}</small>
+                {(testMessage || curlCopyStatus) && (
+                  <div className={`test-status ${testStatus}`}>{curlCopyStatus || testMessage}</div>
+                )}
               </div>
-              <pre>{testRawData || '暂无响应数据'}</pre>
+
+              <div className="provider-test-enable-actions">
+                <div className="provider-test-enable-copy">
+                  <strong className={provider.enabled ? 'is-enabled' : 'is-disabled'}>
+                    {provider.enabled ? '已启用' : '已禁用'}
+                  </strong>
+                  <span>
+                    {testStatus === 'ok'
+                      ? '检测通过，可启用提供商'
+                      : testStatus === 'error'
+                        ? '检测失败，可禁用提供商'
+                        : '可随时启用或禁用提供商'}
+                  </span>
+                </div>
+                <div className="provider-test-enable-buttons">
+                  <button
+                    className={`button button-secondary ${provider.enabled ? 'is-active-enable' : ''}`}
+                    type="button"
+                    disabled={provider.enabled}
+                    onClick={() => onChange({ ...provider, enabled: true })}
+                  >
+                    <Icon name="check" size={15} />
+                    启用
+                  </button>
+                  <button
+                    className={`button button-secondary ${!provider.enabled ? 'is-active-disable' : ''}`}
+                    type="button"
+                    disabled={!provider.enabled}
+                    onClick={() => onChange({ ...provider, enabled: false })}
+                  >
+                    禁用
+                  </button>
+                </div>
+              </div>
+
+              <div className="raw-response-panel">
+                <div className="raw-response-heading">
+                  <span>原始响应</span>
+                  <small>
+                    {testRawData
+                      ? `${testRawData.length} chars`
+                      : testStream
+                        ? 'stream'
+                        : 'non-stream'}
+                  </small>
+                </div>
+                <pre>{testRawData || '暂无响应数据'}</pre>
+              </div>
             </div>
           </section>
         </div>

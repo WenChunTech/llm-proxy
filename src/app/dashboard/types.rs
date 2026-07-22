@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::provider::{UpstreamResponse, types::HeaderMap};
+use crate::provider::UpstreamResponse;
 
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct DashboardPayload {
@@ -164,11 +164,6 @@ pub(super) struct ProviderTestResult {
 
 pub(super) enum ProviderTestStreamResponse {
     Upstream(UpstreamResponse),
-    Direct {
-        status: u16,
-        headers: HeaderMap,
-        response: reqwest::Response,
-    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

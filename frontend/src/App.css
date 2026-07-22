@@ -1661,7 +1661,7 @@ code {
   font-size: 11px;
 }
 
-.modal-backdrop {
+.llm-modal-backdrop {
   position: fixed;
   z-index: 20;
   inset: 0;
@@ -2242,11 +2242,31 @@ code {
   background: #f7faf9;
 }
 
-.provider-test-grid {
+.provider-test-panel {
   display: grid;
-  grid-template-columns: minmax(210px, 0.8fr) minmax(300px, 1.2fr) auto;
-  align-items: start;
   gap: 12px;
+  padding: 12px;
+  border: 1px solid #dfe8e4;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.provider-test-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.provider-test-model-field {
+  min-width: 0;
+}
+
+.provider-test-stream-toggle {
+  justify-self: end;
+  margin-bottom: 6px;
+  padding: 0 2px;
+  white-space: nowrap;
 }
 
 .compact-field {
@@ -2270,7 +2290,7 @@ code {
 
 .prompt-field textarea {
   width: 100%;
-  min-height: 76px;
+  min-height: 84px;
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -2317,12 +2337,14 @@ code {
 }
 
 .provider-test-actions {
-  display: flex;
-  align-items: flex-start;
-  flex-direction: column;
+  display: grid;
   gap: 8px;
-  min-width: 132px;
-  padding-top: 19px;
+}
+
+.provider-test-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .stream-toggle {
@@ -2342,8 +2364,8 @@ code {
   accent-color: var(--teal);
 }
 
-.provider-test-actions .button {
-  width: 100%;
+.provider-test-action-buttons .button {
+  min-width: 118px;
   min-height: 34px;
 }
 
@@ -2352,16 +2374,34 @@ code {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin-top: 10px;
+  gap: 10px 14px;
   padding: 10px 12px;
   border: 1px solid #e6edf1;
   border-radius: 10px;
   background: #f8fafb;
 }
 
-.provider-test-enable-label {
+.provider-test-enable-copy {
+  display: grid;
+  gap: 2px;
   min-width: 0;
+}
+
+.provider-test-enable-copy strong {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.provider-test-enable-copy strong.is-enabled {
+  color: #0f7a63;
+}
+
+.provider-test-enable-copy strong.is-disabled {
+  color: #9a4a4a;
+}
+
+.provider-test-enable-copy span {
   color: #64717b;
   font-size: 12px;
   line-height: 1.4;
@@ -2396,18 +2436,30 @@ code {
 
 .test-status {
   min-width: 0;
-  overflow: hidden;
+  padding: 8px 10px;
+  border: 1px solid #e6edf1;
+  border-radius: 8px;
+  color: #5f6f7c;
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  background: #f8fafb;
 }
 
 .test-status.ok {
-  color: var(--teal);
+  color: #0f7a63;
+  border-color: #b7e6d8;
+  background: #eefaf6;
 }
 
 .test-status.error {
-  color: #c46152;
+  color: #9a4a4a;
+  border-color: #efd0d0;
+  background: #fff5f5;
+}
+
+.provider-test-panel .raw-response-panel {
+  margin-top: 0;
 }
 
 .raw-response-panel {
@@ -2585,13 +2637,27 @@ code {
 :root[data-theme='dark'] .model-endpoint-row,
 :root[data-theme='dark'] .header-row,
 :root[data-theme='dark'] .alias-row,
-:root[data-theme='dark'] .provider-test-enable-actions {
+:root[data-theme='dark'] .provider-test-enable-actions,
+:root[data-theme='dark'] .test-status {
   border-color: #2a3640;
   background: #172028;
 }
 
-:root[data-theme='dark'] .provider-test-enable-label {
+:root[data-theme='dark'] .provider-test-panel {
+  border-color: #2a3640;
+  background: #121a20;
+}
+
+:root[data-theme='dark'] .provider-test-enable-copy span {
   color: #93a1ab;
+}
+
+:root[data-theme='dark'] .provider-test-enable-copy strong.is-enabled {
+  color: #6fd6b8;
+}
+
+:root[data-theme='dark'] .provider-test-enable-copy strong.is-disabled {
+  color: #e0a0a0;
 }
 
 :root[data-theme='dark'] .provider-test-enable-buttons .is-active-enable {
@@ -2601,6 +2667,18 @@ code {
 }
 
 :root[data-theme='dark'] .provider-test-enable-buttons .is-active-disable {
+  color: #e0a0a0;
+  border-color: #5a3030;
+  background: #351f1f;
+}
+
+:root[data-theme='dark'] .test-status.ok {
+  color: #6fd6b8;
+  border-color: #24584a;
+  background: #16362d;
+}
+
+:root[data-theme='dark'] .test-status.error {
   color: #e0a0a0;
   border-color: #5a3030;
   background: #351f1f;
@@ -2672,7 +2750,7 @@ code {
   background: var(--teal-soft);
 }
 
-:root[data-theme='dark'] .modal-backdrop {
+:root[data-theme='dark'] .llm-modal-backdrop {
   background: rgba(4, 9, 14, 0.66);
 }
 
@@ -2865,8 +2943,14 @@ code {
     gap: 8px;
   }
 
-  .provider-test-grid {
+  .provider-test-toolbar {
     grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .provider-test-stream-toggle {
+    justify-self: start;
+    margin-bottom: 0;
   }
 
   .auth-validation-result-row {
@@ -2876,17 +2960,6 @@ code {
 
   .auth-validation-row-actions {
     justify-content: flex-end;
-  }
-
-  .provider-test-actions {
-    align-items: stretch;
-    flex-direction: row;
-    flex-wrap: wrap;
-    padding-top: 0;
-  }
-
-  .provider-test-actions .button {
-    width: auto;
   }
 }
 
@@ -2993,8 +3066,20 @@ code {
     padding: 7px 8px;
   }
 
-  .provider-test-actions .button {
+  .provider-test-action-buttons .button {
     flex: 1 1 130px;
+  }
+
+  .provider-test-enable-actions {
+    align-items: stretch;
+  }
+
+  .provider-test-enable-buttons {
+    width: 100%;
+  }
+
+  .provider-test-enable-buttons .button {
+    flex: 1 1 100px;
   }
 
   .fallback-add-button {

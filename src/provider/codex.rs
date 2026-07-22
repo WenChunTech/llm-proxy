@@ -11,8 +11,8 @@ use crate::{
 use super::{
     TypedSendRequest, UpstreamResponse, collect_response_with_auth,
     oauth::{
-        CODEX_USER_AGENT, DEFAULT_CODEX_BASE_URL, codex_access_token, codex_oauth_base_url,
-        responses_endpoint, select_codex_auth,
+        CODEX_USER_AGENT, DEFAULT_CODEX_BASE_URL, SelectedCredential, codex_access_token,
+        codex_oauth_base_url, responses_endpoint, select_oauth_credential,
     },
     reqwest_headers,
 };
@@ -25,12 +25,17 @@ impl CodexProvider {
         &self,
         request: TypedSendRequest<'_, CodexConfig>,
     ) -> Result<UpstreamResponse, ProxyError> {
-        let api_key = request.config.base.api_key.trim();
-        let api_key = (!api_key.is_empty()).then_some(api_key);
         let provider_base_url = request.config.base.base_url.trim();
-        let (token, account_id, base_url, auth_index, extra_headers) = if let Some(api_key) = api_key {
-            (
-                api_key.to_string(),
+        let selected = select_oauth_credential(
+            &request.config.base.api_key,
+            &request.config.auth,
+            request.auth_start_index,
+            request.target_attempt,
+            "Codex",
+        )?;
+        let (token, account_id, base_url, auth_index, extra_headers) = match selected {
+            SelectedCredential::ApiKey { token } => (
+                token,
                 None,
                 if provider_base_url.is_empty() {
                     DEFAULT_CODEX_BASE_URL.to_string()
@@ -39,42 +44,41 @@ impl CodexProvider {
                 },
                 None,
                 None,
-            )
-        } else {
-            let (auth_index, mut auth) = select_codex_auth(
-                &request.config.auth,
-                request.auth_start_index,
-                request.target_attempt,
-            )?;
-            let auth_key = AuthCursorKey {
-                provider_type: ProviderType::Codex,
-                base_url: provider_base_url.trim_end_matches('/').to_string(),
-                config_index: request.config_index,
-            };
-            if let Some(state) = request.state
-                && let Some(cached_auth) = state.cached_codex_auth(&auth_key, auth_index).await
-            {
-                auth = cached_auth;
+            ),
+            SelectedCredential::Auth {
+                index: auth_index,
+                mut auth,
+            } => {
+                let auth_key = AuthCursorKey {
+                    provider_type: ProviderType::Codex,
+                    base_url: provider_base_url.trim_end_matches('/').to_string(),
+                    config_index: request.config_index,
+                };
+                if let Some(state) = request.state
+                    && let Some(cached_auth) = state.cached_codex_auth(&auth_key, auth_index).await
+                {
+                    auth = cached_auth;
+                }
+                let access_token = codex_access_token(request.client, &mut auth).await?;
+                if access_token.refreshed
+                    && let Some(state) = request.state
+                {
+                    state
+                        .record_codex_auth(&auth_key, auth_index, auth.clone())
+                        .await;
+                }
+                let base_url = codex_oauth_base_url(
+                    (!provider_base_url.is_empty()).then_some(provider_base_url),
+                    &auth,
+                );
+                (
+                    access_token.token,
+                    auth.account_id.clone(),
+                    base_url,
+                    Some(auth_index),
+                    auth.headers.clone(),
+                )
             }
-            let access_token = codex_access_token(request.client, &mut auth).await?;
-            if access_token.refreshed
-                && let Some(state) = request.state
-            {
-                state
-                    .record_codex_auth(&auth_key, auth_index, auth.clone())
-                    .await;
-            }
-            let base_url = codex_oauth_base_url(
-                (!provider_base_url.is_empty()).then_some(provider_base_url),
-                &auth,
-            );
-            (
-                access_token.token,
-                auth.account_id.clone(),
-                base_url,
-                Some(auth_index),
-                auth.headers.clone(),
-            )
         };
         tracing::info!(
             provider = ?ProviderType::Codex,

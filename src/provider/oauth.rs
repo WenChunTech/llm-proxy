@@ -76,6 +76,73 @@ pub fn select_grok_auth(
     select_auth(auth, start_index, target_attempt, "Grok")
 }
 
+/// Credential selected for Codex/Grok: either provider api_key or one auth entry.
+#[derive(Debug, Clone)]
+pub enum SelectedCredential<T> {
+    ApiKey { token: String },
+    Auth { index: usize, auth: T },
+}
+
+/// Number of tryable credentials (enabled auth entries + optional api_key).
+pub fn oauth_credential_count<T: AuthEnabled>(api_key: &str, auth: &OneOrMany<T>) -> usize {
+    let auth_count = auth.enabled_items_with_indices().len();
+    let has_api_key = !api_key.trim().is_empty();
+    auth_count + usize::from(has_api_key)
+}
+
+/// Select among api_key (if set) and enabled auth entries.
+/// Order: api_key first, then enabled auths in config order.
+/// `start_index` is the last successful auth array index (not including api_key).
+pub fn select_oauth_credential<T>(
+    api_key: &str,
+    auth: &OneOrMany<T>,
+    start_index: Option<usize>,
+    target_attempt: usize,
+    provider_name: &str,
+) -> Result<SelectedCredential<T>, ProxyError>
+where
+    T: AuthEnabled + Clone,
+{
+    enum CredRef<'a, T> {
+        ApiKey,
+        Auth(usize, &'a T),
+    }
+
+    let api_key = api_key.trim();
+    let accounts = auth.enabled_items_with_indices();
+    let mut credentials: Vec<CredRef<'_, T>> = Vec::with_capacity(accounts.len() + 1);
+    if !api_key.is_empty() {
+        credentials.push(CredRef::ApiKey);
+    }
+    for (index, item) in accounts {
+        credentials.push(CredRef::Auth(index, item));
+    }
+    if credentials.is_empty() {
+        return Err(ProxyError::Config(format!(
+            "No enabled {provider_name} credentials available (configure api_key or auth)"
+        )));
+    }
+
+    let start = start_index
+        .and_then(|index| {
+            credentials.iter().position(|candidate| {
+                matches!(candidate, CredRef::Auth(auth_index, _) if *auth_index == index)
+            })
+        })
+        .unwrap_or(0);
+    let offset = target_attempt.saturating_sub(1);
+    let selected = &credentials[(start + offset) % credentials.len()];
+    match selected {
+        CredRef::ApiKey => Ok(SelectedCredential::ApiKey {
+            token: api_key.to_string(),
+        }),
+        CredRef::Auth(index, item) => Ok(SelectedCredential::Auth {
+            index: *index,
+            auth: (*item).clone(),
+        }),
+    }
+}
+
 pub async fn codex_access_token(
     client: &reqwest::Client,
     auth: &mut CodexAuth,
@@ -166,7 +233,6 @@ pub fn current_millis() -> i64 {
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or_default()
 }
-
 
 fn select_auth<T>(
     auth: &OneOrMany<T>,
@@ -452,6 +518,3 @@ fn copy_claim_to_value(claims: &Value, auth: &mut Value, claim_name: &str, auth_
         set_auth_string(auth, auth_name, value);
     }
 }
-
-
-
