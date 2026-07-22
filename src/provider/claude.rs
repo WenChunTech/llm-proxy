@@ -1,9 +1,4 @@
-use serde_json::Value;
-
-use crate::{
-    config::ClaudeConfig, error::ProxyError, protocol,
-    provider::types::ProviderType,
-};
+use crate::{config::ClaudeConfig, error::ProxyError};
 
 use super::{
     TypedSendRequest, UpstreamResponse, collect_response,
@@ -14,19 +9,6 @@ use super::{
 pub(super) struct ClaudeProvider;
 
 impl ClaudeProvider {
-    pub(super) fn prepare_request(
-        &self,
-        body: Value,
-        source: ProviderType,
-        is_streaming: bool,
-    ) -> Result<Value, ProxyError> {
-        let mut body = protocol::convert_request(body, source, ProviderType::Claude)?;
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert("stream".to_string(), Value::Bool(is_streaming));
-        }
-        Ok(body)
-    }
-
     pub(super) async fn send_request(
         &self,
         request: TypedSendRequest<'_, ClaudeConfig>,

@@ -5,10 +5,13 @@ mod grok;
 pub mod oauth;
 mod http;
 mod openai;
+mod request_rewrite;
 
 pub mod executor;
 pub mod registry;
 pub mod types;
+
+pub use request_rewrite::{has_rewrite, rewrite_request, wire_protocol};
 
 use bytes::Bytes;
 use reqwest::header::{HeaderMap as ReqwestHeaderMap, HeaderName, HeaderValue};
@@ -65,14 +68,9 @@ impl Providers {
         source: ProviderType,
         is_streaming: bool,
     ) -> Result<Value, ProxyError> {
-        match provider_type {
-            ProviderType::Chat => self.chat.prepare_request(body, source, is_streaming),
-            ProviderType::Responses => self.responses.prepare_request(body, source, is_streaming),
-            ProviderType::Claude => self.claude.prepare_request(body, source, is_streaming),
-            ProviderType::Gemini => self.gemini.prepare_request(body, source, is_streaming),
-            ProviderType::Codex => self.codex.prepare_request(body, source, is_streaming),
-            ProviderType::Grok => self.grok.prepare_request(body, source, is_streaming),
-        }
+        // Provider-scoped pipeline: optional convert → optional rewrite → common.
+        // Individual providers only handle transport (send_request).
+        request_rewrite::prepare_request(provider_type, body, source, is_streaming)
     }
 
     pub async fn send_request(

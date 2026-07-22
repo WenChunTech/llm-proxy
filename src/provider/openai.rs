@@ -1,10 +1,6 @@
-use serde_json::Value;
-
 use crate::{
     config::{OpenAiChatConfig, OpenAiResponsesConfig},
     error::ProxyError,
-    protocol,
-    provider::types::ProviderType,
 };
 
 use super::{
@@ -16,19 +12,6 @@ use super::{
 pub(super) struct OpenAiChatProvider;
 
 impl OpenAiChatProvider {
-    pub(super) fn prepare_request(
-        &self,
-        body: Value,
-        source: ProviderType,
-        is_streaming: bool,
-    ) -> Result<Value, ProxyError> {
-        let mut body = protocol::convert_request(body, source, ProviderType::Chat)?;
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert("stream".to_string(), Value::Bool(is_streaming));
-        }
-        Ok(body)
-    }
-
     pub(super) async fn send_request(
         &self,
         request: TypedSendRequest<'_, OpenAiChatConfig>,
@@ -57,19 +40,6 @@ impl OpenAiChatProvider {
 pub(super) struct OpenAiResponsesProvider;
 
 impl OpenAiResponsesProvider {
-    pub(super) fn prepare_request(
-        &self,
-        body: Value,
-        source: ProviderType,
-        is_streaming: bool,
-    ) -> Result<Value, ProxyError> {
-        let mut body = protocol::convert_request(body, source, ProviderType::Responses)?;
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert("stream".to_string(), Value::Bool(is_streaming));
-        }
-        Ok(body)
-    }
-
     pub(super) async fn send_request(
         &self,
         request: TypedSendRequest<'_, OpenAiResponsesConfig>,

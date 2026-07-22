@@ -66,11 +66,16 @@ impl ProviderType {
         )
     }
 
-    pub fn response_protocol(self) -> Self {
+    /// Upstream wire protocol used for request conversion.
+    pub fn wire_protocol(self) -> Self {
         match self {
             Self::Codex | Self::Grok => Self::Responses,
             other => other,
         }
+    }
+
+    pub fn response_protocol(self) -> Self {
+        self.wire_protocol()
     }
 }
 

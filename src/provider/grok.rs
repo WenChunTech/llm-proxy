@@ -1,8 +1,11 @@
 use serde_json::Value;
 
 use crate::{
-    config::GrokConfig, error::ProxyError, middleware::headers::{apply_map_headers, apply_optional_map_headers, merge_headers}, protocol,
-    provider::types::ProviderType, state::AuthCursorKey,
+    config::GrokConfig,
+    error::ProxyError,
+    middleware::headers::{apply_map_headers, apply_optional_map_headers, merge_headers},
+    provider::types::ProviderType,
+    state::AuthCursorKey,
 };
 
 use super::{
@@ -18,19 +21,6 @@ use super::{
 pub(super) struct GrokProvider;
 
 impl GrokProvider {
-    pub(super) fn prepare_request(
-        &self,
-        body: Value,
-        source: ProviderType,
-        is_streaming: bool,
-    ) -> Result<Value, ProxyError> {
-        let mut body = protocol::convert_request(body, source, ProviderType::Responses)?;
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert("stream".to_string(), Value::Bool(is_streaming));
-        }
-        Ok(body)
-    }
-
     pub(super) async fn send_request(
         &self,
         request: TypedSendRequest<'_, GrokConfig>,

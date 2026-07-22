@@ -1,8 +1,7 @@
-use serde_json::Value;
-
 use crate::{
-    config::GeminiConfig, error::ProxyError, middleware::headers::{apply_map_headers, merge_headers}, protocol,
-    provider::types::ProviderType,
+    config::GeminiConfig,
+    error::ProxyError,
+    middleware::headers::{apply_map_headers, merge_headers},
 };
 
 use super::{TypedSendRequest, UpstreamResponse, collect_response, reqwest_headers};
@@ -11,15 +10,6 @@ use super::{TypedSendRequest, UpstreamResponse, collect_response, reqwest_header
 pub(super) struct GeminiProvider;
 
 impl GeminiProvider {
-    pub(super) fn prepare_request(
-        &self,
-        body: Value,
-        source: ProviderType,
-        _is_streaming: bool,
-    ) -> Result<Value, ProxyError> {
-        protocol::convert_request(body, source, ProviderType::Gemini)
-    }
-
     pub(super) async fn send_request(
         &self,
         request: TypedSendRequest<'_, GeminiConfig>,

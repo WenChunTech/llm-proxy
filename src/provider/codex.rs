@@ -1,8 +1,11 @@
 use serde_json::Value;
 
 use crate::{
-    config::CodexConfig, error::ProxyError, middleware::headers::{apply_map_headers, apply_optional_map_headers, merge_headers}, protocol,
-    provider::types::ProviderType, state::AuthCursorKey,
+    config::CodexConfig,
+    error::ProxyError,
+    middleware::headers::{apply_map_headers, apply_optional_map_headers, merge_headers},
+    provider::types::ProviderType,
+    state::AuthCursorKey,
 };
 
 use super::{
@@ -18,23 +21,6 @@ use super::{
 pub(super) struct CodexProvider;
 
 impl CodexProvider {
-    pub(super) fn prepare_request(
-        &self,
-        body: Value,
-        source: ProviderType,
-        is_streaming: bool,
-    ) -> Result<Value, ProxyError> {
-        let mut body = protocol::convert_request(body, source, ProviderType::Responses)?;
-        let obj = body.as_object_mut().ok_or_else(|| {
-            ProxyError::InvalidRequest("Codex request body must be a JSON object".to_string())
-        })?;
-        obj.remove("max_output_tokens");
-        obj.remove("temperature");
-        obj.insert("store".to_string(), Value::Bool(false));
-        obj.insert("stream".to_string(), Value::Bool(is_streaming));
-        Ok(body)
-    }
-
     pub(super) async fn send_request(
         &self,
         request: TypedSendRequest<'_, CodexConfig>,
