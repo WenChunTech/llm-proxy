@@ -1,6 +1,7 @@
 import { Icon } from '../../components/Icon'
 import { SelectControl } from '../../components/controls/SelectControl'
 import { defaultPriority, providerMeta, providerMarkText } from '../../config/providers'
+import type { ListMoveAction } from '../../lib/list'
 import type { Provider, ProviderKind } from '../../types/domain'
 import { useState } from 'react'
 
@@ -28,10 +29,10 @@ export function RoutingView({
   modelsByProviderKind: Record<ProviderKind, string[]>
   modelAliases: Record<string, string>
   providers: Provider[]
-  onMove: (index: number, direction: -1 | 1) => void
+  onMove: (index: number, action: ListMoveAction) => void
   onReorder: (sourceIndex: number, targetIndex: number) => void
   onRemoveFallback: (model: string) => void
-  onMoveFallback: (index: number, direction: -1 | 1) => void
+  onMoveFallback: (index: number, action: ListMoveAction) => void
   onReorderFallback: (sourceIndex: number, targetIndex: number) => void
   onAddFallbackModel: (model: string) => void
   onAddFallback: () => void
@@ -123,8 +124,10 @@ export function RoutingView({
                   <div className={`provider-avatar ${kind === 'grok' ? 'grok-avatar' : ''}`} style={{ backgroundColor: meta.color }}>{providerMarkText(kind)}</div>
                   <div className="priority-copy"><strong>{meta.label}</strong><span>{count ? `${count} 个活动配置` : '暂无活动配置'}</span></div>
                   <div className="priority-actions">
+                    <button className="icon-button subtle" type="button" title="置顶" disabled={index === 0} onClick={() => onMove(index, 'top')}><Icon name="toTop" size={15} /></button>
                     <button className="icon-button subtle" type="button" title="上移" disabled={index === 0} onClick={() => onMove(index, -1)}><Icon name="arrowUp" size={15} /></button>
                     <button className="icon-button subtle" type="button" title="下移" disabled={index === priority.length - 1} onClick={() => onMove(index, 1)}><Icon name="arrowDown" size={15} /></button>
+                    <button className="icon-button subtle" type="button" title="置底" disabled={index === priority.length - 1} onClick={() => onMove(index, 'bottom')}><Icon name="toBottom" size={15} /></button>
                   </div>
                 </div>
               )
@@ -166,8 +169,10 @@ export function RoutingView({
                 <span className="fallback-index">{index + 1}</span>
                 <div className="fallback-copy"><strong>{model}</strong><span>{allModels.includes(model) ? '已注册模型' : '等待提供商配置'}</span></div>
                 <div className="priority-actions">
+                  <button className="icon-button subtle" type="button" title="置顶" disabled={index === 0} onClick={() => onMoveFallback(index, 'top')}><Icon name="toTop" size={15} /></button>
                   <button className="icon-button subtle" type="button" title="上移" disabled={index === 0} onClick={() => onMoveFallback(index, -1)}><Icon name="arrowUp" size={15} /></button>
                   <button className="icon-button subtle" type="button" title="下移" disabled={index === fallbacks.length - 1} onClick={() => onMoveFallback(index, 1)}><Icon name="arrowDown" size={15} /></button>
+                  <button className="icon-button subtle" type="button" title="置底" disabled={index === fallbacks.length - 1} onClick={() => onMoveFallback(index, 'bottom')}><Icon name="toBottom" size={15} /></button>
                   <button className="icon-button subtle danger-button" type="button" title="移除备用模型" onClick={() => onRemoveFallback(model)}><Icon name="trash" size={15} /></button>
                 </div>
               </div>

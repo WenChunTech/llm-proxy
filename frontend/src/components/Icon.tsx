@@ -19,6 +19,8 @@ const iconPaths: Record<string, string> = {
   check: 'm5 12 4 4L19 6',
   arrowUp: 'm18 15-6-6-6 6',
   arrowDown: 'm6 9 6 6 6-6',
+  toTop: 'M5 5h14M12 19V9M8 13l4-4 4 4',
+  toBottom: 'M5 19h14M12 5v10M8 11l4 4 4-4',
   chevron: 'm9 18 6-6-6-6',
   external: 'M14 5h5v5M19 5l-8 8',
   grip: 'M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01',

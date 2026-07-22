@@ -50,7 +50,7 @@ export function AppShell({
         <div className="brand">
           <div className="brand-mark">L</div>
           <div>
-            <strong>llm-proxy</strong>
+            <strong>LLM Proxy</strong>
             <span>control center</span>
           </div>
           <button

@@ -1,5 +1,6 @@
 import { Icon } from '../../components/Icon'
 import { providerMeta, providerMarkText, effectiveBaseUrlForProvider } from '../../config/providers'
+import type { ListMoveAction } from '../../lib/list'
 import type { AuthProviderKind, AuthValidationTarget, Provider } from '../../types/domain'
 
 type ProviderAuthStats = {
@@ -34,7 +35,7 @@ export function ProviderCard({
   onEdit: (provider: Provider) => void
   onCopy: (provider: Provider) => void
   onDelete: (id: string) => void
-  onMove?: (direction: -1 | 1) => void
+  onMove?: (action: ListMoveAction) => void
   onDragStart?: () => void
   onDragEnd?: () => void
   onDrop?: () => void
@@ -83,6 +84,15 @@ export function ProviderCard({
           <button
             className="icon-button subtle"
             type="button"
+            title="置顶"
+            disabled={!canReorder || priorityIndex === 0}
+            onClick={() => onMove?.('top')}
+          >
+            <Icon name="toTop" size={15} />
+          </button>
+          <button
+            className="icon-button subtle"
+            type="button"
             title="提高优先级"
             disabled={!canReorder || priorityIndex === 0}
             onClick={() => onMove?.(-1)}
@@ -97,6 +107,15 @@ export function ProviderCard({
             onClick={() => onMove?.(1)}
           >
             <Icon name="arrowDown" size={15} />
+          </button>
+          <button
+            className="icon-button subtle"
+            type="button"
+            title="置底"
+            disabled={!canReorder || priorityIndex >= priorityTotal - 1}
+            onClick={() => onMove?.('bottom')}
+          >
+            <Icon name="toBottom" size={15} />
           </button>
         </div>
       </div>

@@ -1,3 +1,5 @@
+export type ListMoveAction = -1 | 1 | 'top' | 'bottom'
+
 export function moveItem<T>(items: T[], index: number, direction: -1 | 1): T[] | null {
   const targetIndex = index + direction
   if (index < 0 || targetIndex < 0 || index >= items.length || targetIndex >= items.length) {
@@ -23,6 +25,13 @@ export function reorderItem<T>(items: T[], sourceIndex: number, targetIndex: num
   const [moved] = next.splice(sourceIndex, 1)
   next.splice(targetIndex, 0, moved)
   return next
+}
+
+export function moveItemByAction<T>(items: T[], index: number, action: ListMoveAction): T[] | null {
+  if (action === -1 || action === 1) return moveItem(items, index, action)
+  if (!items.length || index < 0 || index >= items.length) return null
+  const targetIndex = action === 'top' ? 0 : items.length - 1
+  return reorderItem(items, index, targetIndex)
 }
 
 export function reorderSameKindProviders(

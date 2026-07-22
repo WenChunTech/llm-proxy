@@ -26,6 +26,11 @@ import type {
   ProviderTestPayload,
 } from '../../types/domain'
 
+
+function stringifyHeaders(headers: Record<string, string>) {
+  return Object.keys(headers).length ? JSON.stringify(headers, null, 2) : ''
+}
+
 export function ProviderModal({
   provider,
   isEditing,
@@ -46,8 +51,8 @@ export function ProviderModal({
   const [modelInput, setModelInput] = useState('')
   const [modelSearch, setModelSearch] = useState('')
   const [showSelectedModelsOnly, setShowSelectedModelsOnly] = useState(false)
-  const [headerNameInput, setHeaderNameInput] = useState('')
-  const [headerValueInput, setHeaderValueInput] = useState('')
+  const [headersJson, setHeadersJson] = useState(() => stringifyHeaders(provider.headers))
+  const [headersError, setHeadersError] = useState('')
   const [authJson, setAuthJson] = useState(() => stringifyAuth(provider.auth))
   const [authError, setAuthError] = useState('')
   const [testModel, setTestModel] = useState(() => provider.models[0] ?? '')
@@ -77,17 +82,14 @@ export function ProviderModal({
     () => provider.models.filter(Boolean).sort(),
     [provider.models],
   )
-  const headerEntries = useMemo(
-    () => Object.entries(provider.headers).sort(([a], [b]) => a.localeCompare(b)),
-    [provider.headers],
-  )
   const normalizedModelSearch = modelSearch.trim().toLowerCase()
   const filteredModelOptions = modelOptionList.filter((model) =>
     model.toLowerCase().includes(normalizedModelSearch) &&
     (!showSelectedModelsOnly || selectedModelSet.has(model)),
   )
   const visibleSelectedCount = filteredModelOptions.filter((model) => selectedModelSet.has(model)).length
-  const canSaveProvider = !needsAuthJson || (Boolean(provider.auth) && !authError)
+  const canSaveProvider =
+    !headersError && !authError && (!needsAuthJson || Boolean(provider.auth))
 
   const syncProviderModels = useCallback(async (signal?: AbortSignal) => {
     const endpoint = getProviderModelsEndpointFor(providerKind, providerEffectiveBaseUrl)
@@ -194,34 +196,43 @@ export function ProviderModal({
     onChange({ ...provider, models: provider.models.filter((item) => item !== model) })
   }
 
-  function addHeader() {
-    const name = headerNameInput.trim()
-    if (!name) return
-    onChange({
-      ...provider,
-      headers: {
-        ...provider.headers,
-        [name]: headerValueInput.trim(),
-      },
-    })
-    setHeaderNameInput('')
-    setHeaderValueInput('')
-  }
-
-  function updateHeaderValue(name: string, value: string) {
-    onChange({
-      ...provider,
-      headers: {
-        ...provider.headers,
-        [name]: value,
-      },
-    })
-  }
-
-  function removeHeader(name: string) {
-    const nextHeaders = { ...provider.headers }
-    delete nextHeaders[name]
-    onChange({ ...provider, headers: nextHeaders })
+  function updateHeadersJson(value: string) {
+    setHeadersJson(value)
+    const trimmed = value.trim()
+    if (!trimmed) {
+      onChange({ ...provider, headers: {} })
+      setHeadersError('')
+      return
+    }
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (!isRecord(parsed)) {
+        setHeadersError('Headers JSON 必须是对象，例如 {"X-Custom":"value"}')
+        return
+      }
+      const nextHeaders: Record<string, string> = {}
+      for (const [name, headerValue] of Object.entries(parsed)) {
+        const key = name.trim()
+        if (!key) {
+          setHeadersError('Header 名称不能为空')
+          return
+        }
+        if (typeof headerValue === 'string') {
+          nextHeaders[key] = headerValue
+          continue
+        }
+        if (typeof headerValue === 'number' || typeof headerValue === 'boolean') {
+          nextHeaders[key] = String(headerValue)
+          continue
+        }
+        setHeadersError('Header 值必须是字符串')
+        return
+      }
+      onChange({ ...provider, headers: nextHeaders })
+      setHeadersError('')
+    } catch {
+      setHeadersError('JSON 格式无效')
+    }
   }
 
   function changeKind(kind: ProviderKind) {
@@ -388,56 +399,21 @@ export function ProviderModal({
               <h3>自定义 Headers</h3>
             </div>
             <div className="header-editor">
-              <div className="header-add-row">
-                <label className="header-field">
-                  <span>名称</span>
-                  <input
-                    className="header-input"
-                    value={headerNameInput}
-                    onChange={(event) => setHeaderNameInput(event.target.value)}
-                    onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addHeader() } }}
-                    placeholder="例如 X-Custom-Header"
-                  />
-                </label>
-                <label className="header-field">
-                  <span>值</span>
-                  <input
-                    className="header-input"
-                    value={headerValueInput}
-                    onChange={(event) => setHeaderValueInput(event.target.value)}
-                    onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addHeader() } }}
-                    placeholder="Header value"
-                  />
-                </label>
-                <button className="icon-button accent-button" type="button" title="添加 Header" onClick={addHeader}>
-                  <Icon name="plus" size={16} />
-                </button>
-              </div>
-              <div className="header-list">
-                {headerEntries.map(([name, value]) => (
-                  <div className="header-row" key={name}>
-                    <label className="header-field">
-                      <span>名称</span>
-                      <input className="header-input" value={name} readOnly />
-                    </label>
-                    <label className="header-field">
-                      <span>值</span>
-                      <input
-                        className="header-input"
-                        value={value}
-                        onChange={(event) => updateHeaderValue(name, event.target.value)}
-                        placeholder="Header value"
-                      />
-                    </label>
-                    <button className="icon-button subtle danger-button" type="button" title="移除 Header" onClick={() => removeHeader(name)}>
-                      <Icon name="trash" size={15} />
-                    </button>
-                  </div>
-                ))}
-                {!headerEntries.length && (
-                  <span className="model-sync-status muted-copy">暂无自定义 Header</span>
-                )}
-              </div>
+              <textarea
+                value={headersJson}
+                onChange={(event) => updateHeadersJson(event.target.value)}
+                placeholder='{"X-Custom-Header":"value","User-Agent":"my-client"}'
+                spellCheck={false}
+              />
+              {headersError ? (
+                <span className="model-sync-status muted-copy">{headersError}</span>
+              ) : (
+                <span className="model-sync-status muted-copy">
+                  {supportsAuthJson
+                    ? 'JSON 对象格式；与 auth headers 冲突时优先使用此处的自定义 headers'
+                    : 'JSON 对象格式，例如 {"X-Custom-Header":"value"}'}
+                </span>
+              )}
             </div>
           </section>
           {supportsAuthJson && (
@@ -630,6 +606,33 @@ export function ProviderModal({
                 </button>
                 {(testMessage || curlCopyStatus) && <span className={`test-status ${testStatus}`}>{curlCopyStatus || testMessage}</span>}
               </div>
+              {(testStatus === 'ok' || testStatus === 'error') && (
+                <div className="provider-test-enable-actions">
+                  <span className="provider-test-enable-label">
+                    当前状态：{provider.enabled ? '已启用' : '已禁用'}
+                    {testStatus === 'ok' ? ' · 检测通过，可启用提供商' : ' · 检测失败，可禁用提供商'}
+                  </span>
+                  <div className="provider-test-enable-buttons">
+                    <button
+                      className={`button button-secondary ${provider.enabled ? 'is-active-enable' : ''}`}
+                      type="button"
+                      disabled={provider.enabled}
+                      onClick={() => onChange({ ...provider, enabled: true })}
+                    >
+                      <Icon name="check" size={15} />
+                      启用
+                    </button>
+                    <button
+                      className={`button button-secondary ${!provider.enabled ? 'is-active-disable' : ''}`}
+                      type="button"
+                      disabled={!provider.enabled}
+                      onClick={() => onChange({ ...provider, enabled: false })}
+                    >
+                      禁用
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="raw-response-panel">
               <div className="raw-response-heading">

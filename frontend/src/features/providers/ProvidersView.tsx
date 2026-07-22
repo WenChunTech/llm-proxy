@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { providerMeta, providerMarkText, effectiveBaseUrlForProvider, defaultPriority } from '../../config/providers'
+import type { ListMoveAction } from '../../lib/list'
 import type {
   AuthProviderKind,
   AuthValidationFilter,
@@ -61,7 +62,7 @@ export function ProvidersView({
   onCopy: (provider: Provider) => void
   onDelete: (id: string) => void
   onAdd: () => void
-  onMoveProvider: (id: string, direction: -1 | 1) => void
+  onMoveProvider: (id: string, action: ListMoveAction) => void
   onReorderProvider: (sourceId: string, targetId: string) => void
   onValidateAuths: (kind: AuthProviderKind, targets?: AuthValidationTarget[]) => void
   validatingAuthKind: ProviderKind | null

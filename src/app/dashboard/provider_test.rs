@@ -242,16 +242,17 @@ fn apply_provider_extra_headers(
     mut builder: reqwest::RequestBuilder,
     provider: &DashboardProvider,
 ) -> reqwest::RequestBuilder {
-    for (name, value) in &provider.headers {
-        let value = value.trim();
-        if !value.is_empty() {
-            builder = builder.header(name, value);
-        }
-    }
+    // Auth headers first, then custom provider headers so custom wins on conflicts.
     if matches!(provider.kind.as_str(), "codex" | "grok")
         && let Some(headers) = auth_headers(provider.auth.as_ref())
     {
         for (name, value) in headers {
+            builder = builder.header(name, value);
+        }
+    }
+    for (name, value) in &provider.headers {
+        let value = value.trim();
+        if !value.is_empty() {
             builder = builder.header(name, value);
         }
     }

@@ -129,8 +129,9 @@ impl CodexProvider {
         if let Some(account_id) = account_id.as_ref().filter(|value| !value.is_empty()) {
             headers.insert("chatgpt-account-id".to_string(), account_id.clone());
         }
-        apply_map_headers(&mut headers, &request.config.base.headers);
+        // Priority: custom provider headers override auth headers on conflicts.
         apply_optional_map_headers(&mut headers, extra_headers.as_ref());
+        apply_map_headers(&mut headers, &request.config.base.headers);
 
         let resp = request
             .client

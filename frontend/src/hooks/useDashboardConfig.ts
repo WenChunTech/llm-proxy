@@ -16,7 +16,8 @@ import {
   providersFromImport,
   toApiProvider,
 } from '../lib/configImportExport'
-import { moveItem, reorderItem, reorderSameKindProviders } from '../lib/list'
+import { moveItemByAction, reorderItem, reorderSameKindProviders } from '../lib/list'
+import type { ListMoveAction } from '../lib/list'
 import {
   persistAccessKey,
   readStoredAccessKey,
@@ -258,14 +259,16 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     void persistConfig({ providers: nextProviders })
   }
 
-  function moveProviderConfig(id: string, direction: -1 | 1) {
+  function moveProviderConfig(id: string, action: ListMoveAction) {
     const provider = providers.find((item) => item.id === id)
     if (!provider) return
     const kindProviders = providers.filter((item) => item.kind === provider.kind)
     const index = kindProviders.findIndex((item) => item.id === id)
     if (index < 0) return
-    const target = kindProviders[index + direction]
-    if (!target) return
+    const targetIndex =
+      action === 'top' ? 0 : action === 'bottom' ? kindProviders.length - 1 : index + action
+    const target = kindProviders[targetIndex]
+    if (!target || target.id === id) return
     reorderProviderConfig(id, target.id)
   }
 
@@ -276,8 +279,8 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     void persistConfig({ providers: nextProviders as Provider[] })
   }
 
-  function movePriority(index: number, direction: -1 | 1) {
-    const nextPriority = moveItem(priority, index, direction)
+  function movePriority(index: number, action: ListMoveAction) {
+    const nextPriority = moveItemByAction(priority, index, action)
     if (!nextPriority) return
     setPriority(nextPriority)
     void persistConfig({ priority: nextPriority })
@@ -325,8 +328,9 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     void persistConfig({ fallbacks: nextFallbacks })
   }
 
-  function moveFallback(index: number, direction: -1 | 1) {
-    const targetIndex = index + direction
+  function moveFallback(index: number, action: ListMoveAction) {
+    const targetIndex =
+      action === 'top' ? 0 : action === 'bottom' ? fallbacks.length - 1 : index + action
     reorderFallback(index, targetIndex)
   }
 

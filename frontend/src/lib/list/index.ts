@@ -1,1 +1,2 @@
-export { moveItem, reorderItem, reorderSameKindProviders } from './reorder'
+export { moveItem, moveItemByAction, reorderItem, reorderSameKindProviders } from './reorder'
+export type { ListMoveAction } from './reorder'

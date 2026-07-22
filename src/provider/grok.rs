@@ -117,8 +117,9 @@ impl GrokProvider {
                 ),
             ],
         );
-        apply_map_headers(&mut headers, &request.config.base.headers);
+        // Priority: custom provider headers override auth headers on conflicts.
         apply_optional_map_headers(&mut headers, extra_headers.as_ref());
+        apply_map_headers(&mut headers, &request.config.base.headers);
 
         let resp = request
             .client

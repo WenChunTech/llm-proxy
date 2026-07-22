@@ -10,8 +10,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let state = state::AppState::from_loaded(loaded)?;
     let bind = state.bind_addr().await;
     let router = app::router(state);
-
-    tracing::info!(%bind, "starting llm-proxy on http://{bind} (TLS terminated upstream, e.g. nginx)");
     let acceptor = TcpListener::new(bind).bind().await;
     Server::new(acceptor).serve(router).await;
     Ok(())
