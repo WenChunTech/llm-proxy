@@ -19,6 +19,7 @@ use crate::{
         convert::StreamContext,
         sse::{SseParser, encode_sse},
     },
+    util::debug_dump::{DebugDumpSession, DumpContext, tee_stream},
 };
 
 use super::{JSON_MAX_SIZE, apply_headers, dashboard::models_payload, render_error};
@@ -99,21 +100,51 @@ async fn handle_model_request(
     let stream_context = StreamContext::from_request(target, &request_body);
     let exec_request = ExecuteRequest {
         target,
-        model,
+        model: model.clone(),
         is_streaming,
-        body,
+        body: body.clone(),
         forwarded_headers: get_forwardable_request_headers(req.headers()),
     };
 
     match execute(&state, &snapshot, exec_request.clone()).await {
         Ok(result) => {
-            if let Err(error) =
-                write_execute_result(res, &state, exec_request, stream_context, result).await
+            let dump = DebugDumpSession::begin(
+                &snapshot.config.debug_dump,
+                &DumpContext::new(
+                    &model,
+                    target,
+                    Some(result.provider_type),
+                    is_streaming,
+                )
+                .with_status(result.response.status()),
+            );
+            // Dump the original client body before any protocol conversion.
+            if let Some(session) = dump.as_ref() {
+                session.write_request(&request_body);
+            }
+            if let Err(error) = write_execute_result(
+                res,
+                &state,
+                exec_request,
+                stream_context,
+                result,
+                dump,
+            )
+            .await
             {
                 render_error(res, error);
             }
         }
-        Err(error) => render_error(res, error),
+        Err(error) => {
+            if let Some(session) = DebugDumpSession::begin(
+                &snapshot.config.debug_dump,
+                &DumpContext::new(&model, target, None, is_streaming),
+            ) {
+                session.write_request(&request_body);
+                session.write_error(&error.to_string());
+            }
+            render_error(res, error);
+        }
     }
 }
 
@@ -149,19 +180,35 @@ async fn handle_image_generation(req: &mut Request, depot: &mut Depot, res: &mut
 
     let request = ExecuteImageRequest {
         model: model.to_string(),
-        body,
+        body: body.clone(),
         forwarded_headers: get_forwardable_request_headers(req.headers()),
     };
 
     match execute_image(&state, &snapshot, request).await {
         Ok(result) => {
+            let dump = DebugDumpSession::begin(
+                &snapshot.config.debug_dump,
+                &DumpContext::image(model, Some(result.provider_type))
+                    .with_status(result.response.status()),
+            );
+            if let Some(session) = dump.as_ref() {
+                session.write_request(&body);
+            }
             apply_headers(res, result.response.headers());
             res.status_code(
                 StatusCode::from_u16(result.response.status()).unwrap_or(StatusCode::BAD_GATEWAY),
             );
-            write_passthrough_response(res, result.response);
+            write_passthrough_response(res, result.response, dump);
         }
-        Err(error) => render_error(res, error),
+        Err(error) => {
+            if let Some(session) =
+                DebugDumpSession::begin(&snapshot.config.debug_dump, &DumpContext::image(model, None))
+            {
+                session.write_request(&body);
+                session.write_error(&error.to_string());
+            }
+            render_error(res, error);
+        }
     }
 }
 
@@ -201,6 +248,7 @@ async fn write_execute_result(
     request: ExecuteRequest,
     stream_context: StreamContext,
     result: crate::provider::executor::ExecuteResult,
+    dump: Option<DebugDumpSession>,
 ) -> Result<(), ProxyError> {
     apply_headers(res, result.response.headers());
     res.status_code(
@@ -209,15 +257,23 @@ async fn write_execute_result(
     );
 
     if !result.response.is_success() {
-        write_passthrough_response(res, result.response);
+        write_passthrough_response(res, result.response, dump);
         return Ok(());
     }
 
     match result.response {
         UpstreamResponse::NonStream { body, .. } => {
             if result.provider_type == request.target {
+                if let Some(session) = dump.as_ref() {
+                    session.write_response_bytes(&body);
+                }
                 res.body(body);
                 return Ok(());
+            }
+
+            // Dump unconverted upstream body before protocol conversion.
+            if let Some(session) = dump.as_ref() {
+                session.write_response_bytes(&body);
             }
 
             let raw_response_body = String::from_utf8_lossy(&body).to_string();
@@ -252,7 +308,7 @@ async fn write_execute_result(
         UpstreamResponse::Stream { response, .. } => {
             if result.provider_type == request.target {
                 let stream = response.bytes_stream().map_err(std::io::Error::other);
-                res.stream(stream);
+                res.stream(tee_stream(stream, dump));
                 return Ok(());
             }
 
@@ -261,12 +317,14 @@ async fn write_execute_result(
                 request.target,
                 stream_context,
             );
+            // converted_stream dumps raw upstream chunks; client still receives converted SSE.
             let stream = converted_stream(
                 response,
                 converter,
                 result.provider_type,
                 request.target,
                 request.model,
+                dump,
             );
             res.headers_mut().insert(
                 header::CONTENT_TYPE,
@@ -278,14 +336,21 @@ async fn write_execute_result(
     }
 }
 
-fn write_passthrough_response(res: &mut Response, response: UpstreamResponse) {
+fn write_passthrough_response(
+    res: &mut Response,
+    response: UpstreamResponse,
+    dump: Option<DebugDumpSession>,
+) {
     match response {
         UpstreamResponse::NonStream { body, .. } => {
+            if let Some(session) = dump.as_ref() {
+                session.write_response_bytes(&body);
+            }
             res.body(body);
         }
         UpstreamResponse::Stream { response, .. } => {
             let stream = response.bytes_stream().map_err(std::io::Error::other);
-            res.stream(stream);
+            res.stream(tee_stream(stream, dump));
         }
     }
 }
@@ -296,8 +361,10 @@ fn converted_stream(
     source_provider: ProviderType,
     target_provider: ProviderType,
     model: String,
+    dump: Option<DebugDumpSession>,
 ) -> impl futures_util::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
     let model = std::sync::Arc::<str>::from(model);
+    let dump = dump.map(std::sync::Arc::new);
     let upstream = response.bytes_stream();
     stream::unfold(
         (
@@ -309,6 +376,7 @@ fn converted_stream(
         ),
         move |(mut upstream, mut parser, mut converter, mut pending, mut finished)| {
             let model = model.clone();
+            let dump = dump.clone();
             async move {
                 if let Some(bytes) = pending.pop() {
                     return Some((Ok(bytes), (upstream, parser, converter, pending, finished)));
@@ -319,7 +387,12 @@ fn converted_stream(
 
                 loop {
                     match upstream.next().await {
-                        Some(Ok(bytes)) => match parser.push(&bytes) {
+                        Some(Ok(bytes)) => {
+                            // Persist unconverted upstream bytes before protocol conversion.
+                            if let Some(session) = dump.as_ref() {
+                                session.append_response_chunk(&bytes);
+                            }
+                            match parser.push(&bytes) {
                             Ok(events) => {
                                 tracing::debug!(
                                     source_provider = ?source_provider,
@@ -366,6 +439,7 @@ fn converted_stream(
                                     Err(std::io::Error::other(error)),
                                     (upstream, parser, converter, pending, true),
                                 ));
+                            }
                             }
                         },
                         Some(Err(error)) => {

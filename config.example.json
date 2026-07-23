@@ -23,5 +23,9 @@
     "gemini": [],
     "codex": [],
     "grok": []
+  },
+  "debug_dump": {
+    "enabled": true,
+    "dir": "logs"
   }
 }

@@ -28,6 +28,8 @@ pub struct Config {
     pub model_aliases: HashMap<String, String>,
     pub providers: ProviderGroups,
     pub retry: RetryConfig,
+    /// Persist each request/response body under an ordered directory for debugging.
+    pub debug_dump: DebugDumpConfig,
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
@@ -43,7 +45,27 @@ impl Default for Config {
             model_aliases: HashMap::new(),
             providers: ProviderGroups::default(),
             retry: RetryConfig::default(),
+            debug_dump: DebugDumpConfig::default(),
             extra: HashMap::new(),
+        }
+    }
+}
+
+/// When enabled, each proxied request is stored as:
+/// `{dir}/{YYYYMMDD_HHMMSS_mmm}/` with `meta.json` + unconverted request/response bodies.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct DebugDumpConfig {
+    pub enabled: bool,
+    /// Base directory for per-request dump folders. Default: `logs`.
+    pub dir: String,
+}
+
+impl Default for DebugDumpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            dir: "logs".to_string(),
         }
     }
 }

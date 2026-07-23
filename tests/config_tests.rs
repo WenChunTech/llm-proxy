@@ -343,3 +343,21 @@ fn missing_test_path(name: &str) -> PathBuf {
         .join(format!("llm-proxy-{name}-{}-{nanos}", std::process::id()))
         .join("config.json")
 }
+
+#[test]
+fn debug_dump_config_defaults_and_parses() {
+    let default = Config::default();
+    assert!(!default.debug_dump.enabled);
+    assert_eq!(default.debug_dump.dir, "logs");
+
+    let config = parse_config_value(serde_json::json!({
+        "debug_dump": {
+            "enabled": true,
+            "dir": "req"
+        }
+    }))
+    .unwrap();
+    assert!(config.debug_dump.enabled);
+    assert_eq!(config.debug_dump.dir, "req");
+}
+

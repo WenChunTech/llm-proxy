@@ -1,0 +1,471 @@
+//! Per-request debug dump: unconverted request/response bodies under timestamped directories.
+//!
+//! Bodies are stored *before* protocol conversion:
+//! - `request.json`: original client request body
+//! - `response.*`: raw upstream response body (provider wire format)
+//!
+//! Model / endpoint / provider live in `meta.json`. Directory names are
+//! `{YYYYMMDD_HHMMSS_mmm}` (UTC date + time + milliseconds). Concurrent
+//! requests that land in the same millisecond get a numeric suffix.
+//!
+//! Directory layout (when `debug_dump.enabled` is true):
+//! ```text
+//! {dir}/{YYYYMMDD_HHMMSS_mmm}/
+//!   meta.json
+//!   request.json
+//!   response.json   # non-stream upstream body
+//!   response.sse    # stream upstream chunks (as received from provider)
+//! ```
+
+use std::{
+    fs::{self, File, OpenOptions},
+    io::{self, Write},
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use bytes::Bytes;
+use futures_util::StreamExt;
+use serde::Serialize;
+use serde_json::Value;
+
+use crate::config::DebugDumpConfig;
+use crate::provider::types::ProviderType;
+
+#[derive(Debug, Clone)]
+pub struct DumpContext {
+    pub model: String,
+    pub endpoint: String,
+    pub provider: String,
+    pub is_streaming: bool,
+    pub status: Option<u16>,
+}
+
+impl DumpContext {
+    pub fn new(
+        model: impl Into<String>,
+        endpoint: ProviderType,
+        provider: Option<ProviderType>,
+        is_streaming: bool,
+    ) -> Self {
+        Self {
+            model: model.into(),
+            endpoint: endpoint.as_str().to_string(),
+            provider: provider
+                .map(|p| p.as_str().to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            is_streaming,
+            status: None,
+        }
+    }
+
+    pub fn with_status(mut self, status: u16) -> Self {
+        self.status = Some(status);
+        self
+    }
+
+    pub fn image(model: impl Into<String>, provider: Option<ProviderType>) -> Self {
+        Self {
+            model: model.into(),
+            endpoint: "images".to_string(),
+            provider: provider
+                .map(|p| p.as_str().to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            is_streaming: false,
+            status: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct DebugDumpSession {
+    dir: PathBuf,
+    response_file: Mutex<Option<File>>,
+    response_path: Mutex<Option<PathBuf>>,
+}
+
+impl DebugDumpSession {
+    /// Create a dump session when enabled. Returns `None` when disabled or on I/O failure.
+    pub fn begin(config: &DebugDumpConfig, ctx: &DumpContext) -> Option<Self> {
+        if !config.enabled {
+            return None;
+        }
+
+        let dir = match create_unique_dump_dir(Path::new(&config.dir)) {
+            Ok(dir) => dir,
+            Err(error) => {
+                tracing::warn!(
+                    base_dir = %config.dir,
+                    error = %error,
+                    "failed to create debug dump directory"
+                );
+                return None;
+            }
+        };
+
+        let session = Self {
+            dir: dir.clone(),
+            response_file: Mutex::new(None),
+            response_path: Mutex::new(None),
+        };
+
+        if let Err(error) = session.write_meta(ctx) {
+            tracing::warn!(
+                dir = %dir.display(),
+                error = %error,
+                "failed to write debug dump meta"
+            );
+        }
+
+        tracing::info!(
+            dir = %dir.display(),
+            model = %ctx.model,
+            endpoint = %ctx.endpoint,
+            provider = %ctx.provider,
+            is_streaming = ctx.is_streaming,
+            "debug dump session created"
+        );
+
+        Some(session)
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    pub fn write_request(&self, body: &Value) {
+        if let Err(error) = write_json_file(&self.dir.join("request.json"), body) {
+            tracing::warn!(
+                dir = %self.dir.display(),
+                error = %error,
+                "failed to write debug dump request"
+            );
+        }
+    }
+
+    pub fn write_response_json(&self, body: &Value) {
+        let path = self.dir.join("response.json");
+        if let Err(error) = write_json_file(&path, body) {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "failed to write debug dump response json"
+            );
+        }
+    }
+
+    pub fn write_response_bytes(&self, body: &[u8]) {
+        // Prefer pretty JSON when the body is valid JSON; otherwise write raw bytes.
+        if let Ok(value) = serde_json::from_slice::<Value>(body) {
+            self.write_response_json(&value);
+            return;
+        }
+        let path = self.dir.join("response.bin");
+        if let Err(error) = fs::write(&path, body) {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "failed to write debug dump response bytes"
+            );
+        }
+    }
+
+    pub fn write_error(&self, error: &str) {
+        let payload = serde_json::json!({ "error": error });
+        if let Err(io_error) = write_json_file(&self.dir.join("error.json"), &payload) {
+            tracing::warn!(
+                dir = %self.dir.display(),
+                error = %io_error,
+                "failed to write debug dump error"
+            );
+        }
+    }
+
+    pub fn append_response_chunk(&self, chunk: &[u8]) {
+        if chunk.is_empty() {
+            return;
+        }
+        let path = {
+            let mut path_guard = match self.response_path.lock() {
+                Ok(guard) => guard,
+                Err(error) => {
+                    tracing::warn!(error = %error, "debug dump response path lock poisoned");
+                    return;
+                }
+            };
+            if path_guard.is_none() {
+                *path_guard = Some(self.dir.join("response.sse"));
+            }
+            path_guard.clone().expect("response path just set")
+        };
+
+        let mut guard = match self.response_file.lock() {
+            Ok(guard) => guard,
+            Err(error) => {
+                tracing::warn!(error = %error, "debug dump response file lock poisoned");
+                return;
+            }
+        };
+        if guard.is_none() {
+            match OpenOptions::new().create(true).append(true).open(&path) {
+                Ok(file) => *guard = Some(file),
+                Err(error) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "failed to open debug dump response stream file"
+                    );
+                    return;
+                }
+            }
+        }
+        if let Some(file) = guard.as_mut()
+            && let Err(error) = file.write_all(chunk)
+        {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "failed to append debug dump response chunk"
+            );
+        }
+    }
+
+    fn write_meta(&self, ctx: &DumpContext) -> std::io::Result<()> {
+        #[derive(Serialize)]
+        struct Meta<'a> {
+            model: &'a str,
+            endpoint: &'a str,
+            provider: &'a str,
+            is_streaming: bool,
+            status: Option<u16>,
+            dir: String,
+        }
+        let meta = Meta {
+            model: &ctx.model,
+            endpoint: &ctx.endpoint,
+            provider: &ctx.provider,
+            is_streaming: ctx.is_streaming,
+            status: ctx.status,
+            dir: self.dir.display().to_string(),
+        };
+        let raw = serde_json::to_vec_pretty(&meta)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        fs::write(self.dir.join("meta.json"), raw)
+    }
+}
+
+/// Wrap a byte stream so each successful chunk is also appended to the dump session.
+pub fn tee_stream<S>(
+    stream: S,
+    dump: Option<DebugDumpSession>,
+) -> impl futures_util::Stream<Item = Result<Bytes, std::io::Error>> + Send
+where
+    S: futures_util::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static,
+{
+    let dump = dump.map(std::sync::Arc::new);
+    stream.map(move |item| {
+        if let (Ok(bytes), Some(session)) = (&item, dump.as_ref()) {
+            session.append_response_chunk(bytes);
+        }
+        item
+    })
+}
+
+fn write_json_file(path: &Path, value: &Value) -> std::io::Result<()> {
+    let raw = serde_json::to_vec_pretty(value)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    fs::write(path, raw)
+}
+
+/// Keep directory components filesystem-safe and reasonably short.
+pub fn sanitize_component(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len().min(80));
+    for ch in raw.chars() {
+        if out.len() >= 80 {
+            break;
+        }
+        let mapped = match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
+            '/' | '\\' | ':' | ' ' | '|' | '*' | '?' | '"' | '<' | '>' => '_',
+            _ => '_',
+        };
+        out.push(mapped);
+    }
+    let trimmed = out.trim_matches('_');
+    if trimmed.is_empty() {
+        "unknown".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Create `{root}/{YYYYMMDD_HHMMSS_mmm}[/_{n}]`, exclusive per concurrent request.
+fn create_unique_dump_dir(root: &Path) -> io::Result<PathBuf> {
+    fs::create_dir_all(root)?;
+
+    // First try pure date+time(+ms). On collision (concurrent requests in the
+    // same millisecond), append a small disambiguator while keeping the timestamp prefix.
+    for attempt in 0u32..10_000 {
+        let stamp = format_timestamp_millis(SystemTime::now());
+        let name = if attempt == 0 {
+            stamp
+        } else {
+            format!("{stamp}_{attempt}")
+        };
+        let path = root.join(name);
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "exhausted unique debug dump directory names",
+    ))
+}
+
+/// UTC timestamp `YYYYMMDD_HHMMSS_mmm` without external time crates.
+fn format_timestamp_millis(time: SystemTime) -> String {
+    let duration = time.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let total_secs = duration.as_secs();
+    let millis = duration.subsec_millis();
+    let secs_of_day = total_secs % 86_400;
+    let hour = secs_of_day / 3600;
+    let minute = (secs_of_day % 3600) / 60;
+    let second = secs_of_day % 60;
+
+    let mut days = total_secs / 86_400;
+    let mut year = 1970u64;
+    loop {
+        let diy = if is_leap(year) { 366 } else { 365 };
+        if days < diy {
+            break;
+        }
+        days -= diy;
+        year += 1;
+    }
+
+    let months = if is_leap(year) {
+        [31u64, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let mut month = 1u64;
+    for &len in &months {
+        if days < len {
+            break;
+        }
+        days -= len;
+        month += 1;
+    }
+    let day = days + 1;
+
+    format!("{year:04}{month:02}{day:02}_{hour:02}{minute:02}{second:02}_{millis:03}")
+}
+
+fn is_leap(year: u64) -> bool {
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::DebugDumpConfig;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn sanitize_replaces_unsafe_chars() {
+        assert_eq!(
+            sanitize_component("deepseek-ai/deepseek-v4-flash"),
+            "deepseek-ai_deepseek-v4-flash"
+        );
+        assert_eq!(sanitize_component(""), "unknown");
+        assert_eq!(sanitize_component("???"), "unknown");
+    }
+
+    #[test]
+    fn begin_writes_request_and_response_under_timestamp_dir() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("llm-proxy-debug-dump-{nanos}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let config = DebugDumpConfig {
+            enabled: true,
+            dir: dir.display().to_string(),
+        };
+        let ctx =
+            DumpContext::new("gpt-4o", ProviderType::Chat, Some(ProviderType::Claude), false)
+                .with_status(200);
+        let session = DebugDumpSession::begin(&config, &ctx).expect("session");
+        session.write_request(&serde_json::json!({"model":"gpt-4o","messages":[]}));
+        session.write_response_json(&serde_json::json!({"id":"resp"}));
+
+        let name = session.dir().file_name().unwrap().to_string_lossy();
+        // Directory is date+time(+ms), not model/endpoint/provider/seq.
+        assert!(
+            name.chars().all(|c| c.is_ascii_digit() || c == '_'),
+            "unexpected dir name: {name}"
+        );
+        assert!(!name.contains("gpt-4o"), "{name}");
+        assert!(!name.contains("openai_chat"), "{name}");
+        assert!(session.dir().join("request.json").is_file());
+        assert!(session.dir().join("response.json").is_file());
+        assert!(session.dir().join("meta.json").is_file());
+
+        let meta: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(session.dir().join("meta.json")).unwrap())
+                .unwrap();
+        assert_eq!(meta["model"], "gpt-4o");
+        assert_eq!(meta["endpoint"], "openai_chat");
+        assert_eq!(meta["provider"], "claude");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn concurrent_begin_creates_distinct_dirs() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("llm-proxy-debug-dump-conc-{nanos}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let config = DebugDumpConfig {
+            enabled: true,
+            dir: dir.display().to_string(),
+        };
+        let ctx = DumpContext::new("m", ProviderType::Chat, Some(ProviderType::Chat), false);
+
+        let sessions: Vec<_> = (0..8)
+            .map(|_| DebugDumpSession::begin(&config, &ctx).expect("session"))
+            .collect();
+        let mut names: Vec<_> = sessions
+            .iter()
+            .map(|s| s.dir().file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), 8, "dirs must be unique under concurrency: {names:?}");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn disabled_config_returns_none() {
+        let config = DebugDumpConfig {
+            enabled: false,
+            dir: "logs".into(),
+        };
+        let ctx = DumpContext::new("m", ProviderType::Chat, None, false);
+        assert!(DebugDumpSession::begin(&config, &ctx).is_none());
+    }
+}

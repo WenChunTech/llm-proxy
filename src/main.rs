@@ -1,6 +1,5 @@
-use llm_proxy::{app, config, state};
+use llm_proxy::{app, config, state, util::log_filter};
 use salvo::prelude::*;
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -20,16 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 fn init_tracing(log_level: Option<&str>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let filter = match EnvFilter::try_from_default_env() {
-        Ok(filter) => filter,
-        Err(_) => {
-            let directive = log_level
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or("info");
-            EnvFilter::try_new(directive)?
-        }
-    };
+    let filter = log_filter::resolve_env_filter(log_level)?;
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)

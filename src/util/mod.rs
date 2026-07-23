@@ -1,3 +1,5 @@
+pub mod debug_dump;
+pub mod log_filter;
 pub mod json_auth;
 pub mod url;
 
