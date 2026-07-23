@@ -15,6 +15,7 @@ import { ProviderCard } from './ProviderCard'
 import {
   AuthValidationResultRow,
   authValidationFilterOptions,
+  authValidationSummary,
   buildAuthValidationLookup,
   buildProviderKindIndexMap,
   buildProviderOrderMap,
@@ -84,6 +85,7 @@ export function ProvidersView({
     return matchesFilter && matchesKind && searchText.includes(query.toLowerCase())
   })
   const authValidationResults = authValidation ? visibleAuthValidationResults(authValidation) : []
+  const authSummary = authValidation ? authValidationSummary(authValidation.payload.results) : null
   const groupedProviders = defaultPriority
     .map((kind) => ({
       kind,
@@ -194,12 +196,14 @@ export function ProvidersView({
               <strong>{providerMeta[authValidation.kind].label} 校验结果</strong>
             </div>
             <div className="auth-validation-metrics">
-              <span>总数 {authValidation.payload.total}</span>
-              <span>有效 {authValidation.payload.valid}</span>
-              <span>无效 {authValidation.payload.invalid}</span>
-              <span>限流 {authValidation.payload.rateLimited}</span>
-              <span>禁用 {authValidation.payload.results.filter((result) => result.disabled).length}</span>
-              <span>刷新 {authValidation.payload.refreshed}</span>
+              <span className="summary total">总数 <b>{authSummary?.total ?? 0}</b></span>
+              <span className="summary enabled">启用 <b>{authSummary?.enabled ?? 0}</b></span>
+              <span className="summary disabled">禁用 <b>{authSummary?.disabled ?? 0}</b></span>
+              <span className="status ok">有效 <b>{authSummary?.valid ?? 0}</b></span>
+              <span className="status error">无效 <b>{authSummary?.invalid ?? 0}</b></span>
+              <span className="status skipped">跳过 <b>{authSummary?.skipped ?? 0}</b></span>
+              <span className="status limited">限流 <b>{authSummary?.rateLimited ?? 0}</b></span>
+              <span>刷新 <b>{authSummary?.refreshed ?? 0}</b></span>
             </div>
           </div>
           <div className="auth-validation-toolbar">
@@ -252,4 +256,3 @@ export function ProvidersView({
     </>
   )
 }
-

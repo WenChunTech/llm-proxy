@@ -154,7 +154,6 @@ enum RestBody {
     Pipeline(Vec<CommandResponse>),
 }
 
-
 fn decode_rest_body(body: &str, op: &str) -> Result<CommandResponse, ProxyError> {
     let payload: RestBody = serde_json::from_str(body).map_err(|error| {
         ProxyError::Config(format!("invalid upstash redis {op} response: {error}"))
@@ -195,7 +194,9 @@ pub fn parse_get_result(body: &str) -> Result<Option<String>, ProxyError> {
         CommandResponse::Err { error } => Err(ProxyError::Config(format!(
             "upstash redis GET error: {error}"
         ))),
-        CommandResponse::Ok { result: Value::Null } => Ok(None),
+        CommandResponse::Ok {
+            result: Value::Null,
+        } => Ok(None),
         CommandResponse::Ok {
             result: Value::String(raw),
         } if raw.trim().is_empty() => Ok(None),

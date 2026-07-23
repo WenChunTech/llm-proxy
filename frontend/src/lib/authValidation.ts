@@ -114,7 +114,7 @@ export function normalizeAuthValidationPayloadStats(payload: AuthValidationPaylo
     ...payload,
     total: results.length,
     checked: results.filter((result) => !result.skipped).length,
-    valid: results.filter((result) => result.valid).length,
+    valid: results.filter((result) => result.valid && result.reason !== 'rate_limited').length,
     invalid: results.filter((result) => !result.valid && !result.skipped).length,
     skipped: results.filter((result) => result.skipped).length,
     rateLimited: results.filter((result) => result.reason === 'rate_limited').length,

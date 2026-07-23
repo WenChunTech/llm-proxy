@@ -10,6 +10,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let state = state::AppState::from_loaded(loaded)?;
     let bind = state.bind_addr().await;
     let router = app::router(state);
+    tracing::info!(
+        bind = %bind,
+        "starting HTTP server with HTTP/1.1 and cleartext HTTP/2"
+    );
     let acceptor = TcpListener::new(bind).bind().await;
     Server::new(acceptor).serve(router).await;
     Ok(())

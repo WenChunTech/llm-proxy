@@ -62,7 +62,6 @@ impl Config {
             .unwrap_or_else(|| model.to_string())
     }
 }
-
 fn parse_config_json(raw: &str) -> Result<Config, ProxyError> {
     let value: Value = serde_json::from_str(raw)?;
     parse_config_value(value)

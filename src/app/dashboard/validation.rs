@@ -373,6 +373,17 @@ async fn probe_validation_auth(
     match builder.send().await {
         Ok(response) => {
             let status_code = response.status().as_u16();
+            // 2xx: auth is usable; skip response body to keep the payload small.
+            if (200..300).contains(&status_code) {
+                let _ = response.bytes().await;
+                return AuthValidationProbe {
+                    valid: true,
+                    reason: "ok".to_string(),
+                    status_code,
+                    error_message: String::new(),
+                };
+            }
+
             let body = response.text().await.unwrap_or_default();
             classify_validation_response(provider_type, status_code, &body)
         }
@@ -445,7 +456,7 @@ fn classify_validation_response(
     }
 
     let (valid, reason) = match status_code {
-        200 | 201 => (true, "ok"),
+        200..=299 => (true, "ok"),
         402 => (false, "payment_required"),
         403 => (false, "forbidden"),
         429 => (true, "rate_limited"),
@@ -453,11 +464,17 @@ fn classify_validation_response(
         500..=599 => (true, "server_error"),
         _ => (false, "unexpected"),
     };
+    // Only non-2xx responses include upstream body/error details.
+    let error_message = if (200..300).contains(&status_code) {
+        String::new()
+    } else {
+        validation_error_message(error_type.as_ref(), body)
+    };
     AuthValidationProbe {
         valid,
         reason: reason.to_string(),
         status_code,
-        error_message: validation_error_message(error_type.as_ref(), body),
+        error_message,
     }
 }
 
@@ -510,5 +527,3 @@ async fn refresh_validation_auth(
         _ => Ok(()),
     }
 }
-
-

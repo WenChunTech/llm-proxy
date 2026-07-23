@@ -74,13 +74,40 @@ export function providerAuthStats(
     ? provider.auth
     : provider.auth === undefined || provider.auth === null ? [] : [provider.auth]
   const results = authValidation?.kind === provider.kind ? lookup.get(`${providerIndex}`) ?? [] : []
-  const disabledFromConfig = authItems.filter((auth) => !provider.enabled || authValueDisabled(auth)).length
-  const activeResults = results.filter((item) => !item.disabled)
+  const disabled = authItems.filter((auth) => !provider.enabled || authValueDisabled(auth)).length
+  const enabled = Math.max(0, authItems.length - disabled)
+  const activeResults = results.filter((item) => !item.disabled && item.authIndex < authItems.length)
+  const valid = activeResults.filter((item) => item.valid && item.reason !== 'rate_limited').length
+  const invalid = activeResults.filter((item) => !item.valid && !item.skipped).length
+  const rateLimited = activeResults.filter((item) => item.reason === 'rate_limited').length
   return {
     total: authItems.length,
-    valid: activeResults.filter((item) => item.valid && item.reason !== 'rate_limited').length,
-    invalid: activeResults.filter((item) => !item.valid && !item.skipped).length,
-    disabled: disabledFromConfig,
+    enabled,
+    valid,
+    invalid,
+    rateLimited,
+    disabled,
+    unchecked: Math.max(0, enabled - valid - invalid - rateLimited),
+  }
+}
+
+export function authValidationSummary(results: AuthValidationState['payload']['results']) {
+  const total = results.length
+  const disabled = results.filter((result) => result.disabled).length
+  const enabled = Math.max(0, total - disabled)
+  const enabledResults = results.filter((result) => !result.disabled)
+  const valid = enabledResults.filter((result) => result.valid && result.reason !== 'rate_limited').length
+  const invalid = enabledResults.filter((result) => !result.valid && !result.skipped).length
+  const skipped = enabledResults.filter((result) => result.skipped).length
+  return {
+    total,
+    enabled,
+    disabled,
+    valid,
+    invalid,
+    skipped,
+    rateLimited: enabledResults.filter((result) => result.reason === 'rate_limited').length,
+    refreshed: results.filter((result) => result.refreshed).length,
   }
 }
 

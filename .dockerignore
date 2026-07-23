@@ -39,9 +39,12 @@ dist-ssr/
 
 .playwright-cli/
 
-# Keep docker/llm-proxy for image packaging; ignore other local junk under docker/
+# Keep prebuilt static binaries for image packaging; ignore other local junk under docker/
 docker/*
-!docker/llm-proxy
+!docker/amd64/
+!docker/arm64/
+!docker/amd64/llm-proxy
+!docker/arm64/llm-proxy
 
 # Integration tests are not needed in the image build.
 tests/

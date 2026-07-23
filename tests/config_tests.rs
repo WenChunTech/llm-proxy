@@ -1,13 +1,9 @@
-use std::{
-    collections::HashMap,
-    fs,
-    path::PathBuf,
-};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 use llm_proxy::config::{
     BaseProviderConfig, CodexAuth, CodexConfig, Config, ConfigPersist, ConfigSources, GrokAuth,
-    GrokConfig, OneOrMany, OpenAiChatConfig, ProviderGroups, UpstashRedis, load_config_from_sources,
-    parse_config_value, validate_config,
+    GrokConfig, OneOrMany, OpenAiChatConfig, ProviderGroups, UpstashRedis,
+    load_config_from_sources, parse_config_value, validate_config,
 };
 use serde_json::json;
 
@@ -158,7 +154,11 @@ async fn redis_miss_seeds_default_config_and_ignores_config_file() {
     assert!(matches!(loaded.persist, ConfigPersist::Redis(_)));
 
     // Missing Redis key is initialized with the default config.
-    let seeded = redis.get().await.unwrap().expect("redis key should be seeded");
+    let seeded = redis
+        .get()
+        .await
+        .unwrap()
+        .expect("redis key should be seeded");
     let seeded_config: Config = serde_json::from_str(&seeded).unwrap();
     assert_eq!(seeded_config.port, Config::default().port);
 
@@ -343,4 +343,3 @@ fn missing_test_path(name: &str) -> PathBuf {
         .join(format!("llm-proxy-{name}-{}-{nanos}", std::process::id()))
         .join("config.json")
 }
-

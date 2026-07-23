@@ -5,9 +5,12 @@ import type { AuthProviderKind, AuthValidationTarget, Provider } from '../../typ
 
 type ProviderAuthStats = {
   total: number
+  enabled: number
   valid: number
   invalid: number
+  rateLimited: number
   disabled: number
+  unchecked: number
 }
 
 export function ProviderCard({
@@ -47,6 +50,12 @@ export function ProviderCard({
   const effectiveBaseUrl = effectiveBaseUrlForProvider(provider)
   const canValidateAuth = Boolean(onValidateAuth && authTargets?.length && (provider.kind === 'codex' || provider.kind === 'grok'))
   const canReorder = Boolean(onMove && priorityTotal > 1)
+  const enabledAuthPercent = authStats && authStats.total > 0
+    ? `${(authStats.enabled / authStats.total) * 100}%`
+    : '0%'
+  const disabledAuthPercent = authStats && authStats.total > 0
+    ? `${(authStats.disabled / authStats.total) * 100}%`
+    : '0%'
   return (
     <article
       className={`provider-card ${provider.enabled ? '' : 'is-disabled'} ${isDragging ? 'is-dragging' : ''} ${canReorder ? 'is-reorderable' : ''}`}
@@ -129,11 +138,23 @@ export function ProviderCard({
           <span className="provider-type">{meta.label} <i /> {meta.description}</span>
           <div className="provider-url"><Icon name="external" size={14} /><code>{effectiveBaseUrl || 'base_url 未配置'}</code></div>
           {authStats && (
-            <div className="provider-auth-stats">
-              <span>AUTH {authStats.total}</span>
-              <span>有效 {authStats.valid}</span>
-              <span>无效 {authStats.invalid}</span>
-              <span>禁用 {authStats.disabled}</span>
+            <div className="provider-auth-overview">
+              <div className="provider-auth-total-row">
+                <span>AUTH <b>{authStats.total}</b></span>
+                <code>{authStats.enabled} 启用 + {authStats.disabled} 禁用</code>
+              </div>
+              <div className="provider-auth-meter" aria-hidden="true">
+                <span className="enabled" style={{ width: enabledAuthPercent }} />
+                <span className="disabled" style={{ width: disabledAuthPercent }} />
+              </div>
+              <div className="provider-auth-stats">
+                <span className="auth-stat enabled">启用 <b>{authStats.enabled}</b></span>
+                <span className="auth-stat valid">有效 <b>{authStats.valid}</b></span>
+                <span className="auth-stat invalid">无效 <b>{authStats.invalid}</b></span>
+                {authStats.rateLimited > 0 && <span className="auth-stat limited">限流 <b>{authStats.rateLimited}</b></span>}
+                {authStats.unchecked > 0 && <span className="auth-stat unchecked">待校验 <b>{authStats.unchecked}</b></span>}
+                <span className="auth-stat disabled">禁用 <b>{authStats.disabled}</b></span>
+              </div>
             </div>
           )}
         </div>
