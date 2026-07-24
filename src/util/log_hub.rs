@@ -129,29 +129,6 @@ impl Drop for LogLineWriter {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ring_buffer_evicts_oldest() {
-        let hub = LogHub::with_capacity(2);
-        hub.push("one");
-        hub.push("two");
-        hub.push("three");
-        assert_eq!(hub.snapshot(), vec!["two".to_string(), "three".to_string()]);
-    }
-
-    #[test]
-    fn subscribers_receive_new_lines() {
-        let hub = LogHub::new();
-        let mut rx = hub.subscribe();
-        hub.push("hello");
-        let line = rx.try_recv().expect("line");
-        assert_eq!(line, "hello");
-    }
-}
-
 fn strip_ansi(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
@@ -177,4 +154,27 @@ fn strip_ansi(input: &str) -> String {
         i += ch.len_utf8();
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ring_buffer_evicts_oldest() {
+        let hub = LogHub::with_capacity(2);
+        hub.push("one");
+        hub.push("two");
+        hub.push("three");
+        assert_eq!(hub.snapshot(), vec!["two".to_string(), "three".to_string()]);
+    }
+
+    #[test]
+    fn subscribers_receive_new_lines() {
+        let hub = LogHub::new();
+        let mut rx = hub.subscribe();
+        hub.push("hello");
+        let line = rx.try_recv().expect("line");
+        assert_eq!(line, "hello");
+    }
 }

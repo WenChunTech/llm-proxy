@@ -5,7 +5,7 @@ import {
   normalizePriority,
   normalizeProviderKind,
 } from '../config/providers'
-import { apiAuthHeaders, fetchModelCatalog } from '../lib/api'
+import { apiAuthHeaders, fetchModelCatalog, remoteModelsFrom } from '../lib/api'
 import { downloadJson } from '../lib/browser'
 import {
   buildConfigExport,
@@ -141,10 +141,13 @@ export function useDashboardConfig(setToast: (message: string) => void) {
 
   const loadConfig = useCallback(async () => {
     try {
-      const response = await fetch('/api/config', {
+      // Start independent requests together to avoid config → catalog waterfall.
+      const configPromise = fetch('/api/config', {
         headers: apiAuthHeaders(accessKey),
         signal: AbortSignal.timeout(5000),
       })
+      const catalogPromise = fetchModelCatalog(accessKey)
+      const response = await configPromise
       if (response.status === 401) {
         setAuthStatus('login')
         return
@@ -153,14 +156,12 @@ export function useDashboardConfig(setToast: (message: string) => void) {
       const payload = (await response.json()) as DashboardPayload
       applyPayload(payload)
       setAuthStatus('ready')
-      const catalog = await fetchModelCatalog(accessKey)
+      const catalog = await catalogPromise
       setModelCatalog(catalog)
       setRemoteModels(
-        Array.from(
-          new Set([
-            ...payload.providers.flatMap((item) => item.models),
-            ...catalog.map((item) => item.id),
-          ]),
+        remoteModelsFrom(
+          payload.providers.flatMap((item) => item.models),
+          catalog,
         ),
       )
     } catch {
@@ -294,10 +295,12 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     event.preventDefault()
     const nextKey = authInput.trim()
     try {
-      const response = await fetch('/api/config', {
+      const configPromise = fetch('/api/config', {
         headers: apiAuthHeaders(nextKey),
         signal: AbortSignal.timeout(5000),
       })
+      const catalogPromise = fetchModelCatalog(nextKey)
+      const response = await configPromise
       if (response.status === 401) {
         setToast('API Key 不正确')
         return
@@ -308,14 +311,12 @@ export function useDashboardConfig(setToast: (message: string) => void) {
       setAccessKey(nextKey)
       setAuthStatus('ready')
       applyPayload(payload)
-      const catalog = await fetchModelCatalog(nextKey)
+      const catalog = await catalogPromise
       setModelCatalog(catalog)
       setRemoteModels(
-        Array.from(
-          new Set([
-            ...payload.providers.flatMap((item) => item.models),
-            ...catalog.map((item) => item.id),
-          ]),
+        remoteModelsFrom(
+          payload.providers.flatMap((item) => item.models),
+          catalog,
         ),
       )
     } catch {

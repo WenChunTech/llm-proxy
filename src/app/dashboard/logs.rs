@@ -418,12 +418,11 @@ fn file_language(name: &str) -> &'static str {
 
 /// Pretty-print JSON when possible; otherwise return readable UTF-8 text.
 fn format_file_content(name: &str, bytes: &[u8]) -> String {
-    if name.ends_with(".json") || looks_like_json(bytes) {
-        if let Ok(value) = serde_json::from_slice::<Value>(bytes)
-            && let Ok(pretty) = serde_json::to_string_pretty(&value)
-        {
-            return pretty;
-        }
+    if (name.ends_with(".json") || looks_like_json(bytes))
+        && let Ok(value) = serde_json::from_slice::<Value>(bytes)
+        && let Ok(pretty) = serde_json::to_string_pretty(&value)
+    {
+        return pretty;
     }
     // Strip NULs / replace invalid sequences so the browser never shows binary garbage.
     let text = String::from_utf8_lossy(bytes);

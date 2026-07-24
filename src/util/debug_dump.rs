@@ -228,10 +228,9 @@ impl DebugDumpSession {
                     return;
                 }
             };
-            if path_guard.is_none() {
-                *path_guard = Some(self.dir.join("response.sse"));
-            }
-            path_guard.clone().expect("response path just set")
+            path_guard
+                .get_or_insert_with(|| self.dir.join("response.sse"))
+                .clone()
         };
 
         let mut guard = match self.response_file.lock() {
@@ -254,15 +253,15 @@ impl DebugDumpSession {
                 }
             }
         }
-        if let Some(file) = guard.as_mut() {
-            if let Err(error) = file.write_all(chunk) {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %error,
-                    "failed to append debug dump response chunk"
-                );
-                return;
-            }
+        if let Some(file) = guard.as_mut()
+            && let Err(error) = file.write_all(chunk)
+        {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "failed to append debug dump response chunk"
+            );
+            return;
         }
 
         if let Some(hub) = self.hub.as_ref()

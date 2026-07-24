@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use serde_json::Value;
@@ -25,7 +26,8 @@ pub struct ExecuteRequest {
     pub target: ProviderType,
     pub model: String,
     pub is_streaming: bool,
-    pub body: Value,
+    /// Shared request JSON; cloned only when an attempt needs a mutable copy.
+    pub body: Arc<Value>,
     pub forwarded_headers: crate::provider::types::HeaderMap,
 }
 
@@ -38,7 +40,7 @@ pub struct ExecuteResult {
 #[derive(Debug, Clone)]
 pub struct ExecuteImageRequest {
     pub model: String,
-    pub body: Value,
+    pub body: Arc<Value>,
     pub forwarded_headers: crate::provider::types::HeaderMap,
 }
 
@@ -47,6 +49,7 @@ pub async fn execute(
     snapshot: &AppSnapshot,
     request: ExecuteRequest,
 ) -> Result<ExecuteResult, ProxyError> {
+    let request = Arc::new(request);
     let resolved_model = snapshot.config.resolve_model_alias(&request.model);
     if resolved_model != request.model {
         tracing::info!(
@@ -67,7 +70,7 @@ pub async fn execute(
         .any(|model| snapshot.registry.has_any_provider_for_model(model))
     {
         return Err(ProxyError::ModelNotConfigured {
-            model: request.model,
+            model: request.model.clone(),
             attempted: models_to_try,
         });
     }
@@ -110,6 +113,7 @@ pub async fn execute_image(
     snapshot: &AppSnapshot,
     request: ExecuteImageRequest,
 ) -> Result<ExecuteResult, ProxyError> {
+    let request = Arc::new(request);
     let resolved_model = snapshot.config.resolve_model_alias(&request.model);
     let mut targets = snapshot.registry.attempt_targets(&resolved_model);
     targets.retain(|target| image_provider_config(target).is_some());
@@ -131,7 +135,7 @@ pub async fn execute_image(
         &mut retry_budget,
         "image",
         |target, _target_attempt| {
-            let request = request.clone();
+            let request = Arc::clone(&request);
             let target = target.clone();
             async move {
                 let result = try_image_target(state, &request, &target).await?;
@@ -278,7 +282,7 @@ where
 async fn execute_single_model(
     state: &AppState,
     snapshot: &AppSnapshot,
-    request: &ExecuteRequest,
+    request: &Arc<ExecuteRequest>,
     model: &str,
     last_error: &mut Option<ProxyError>,
 ) -> Result<Option<ExecuteResult>, ProxyError> {
@@ -294,7 +298,7 @@ async fn execute_single_model(
         &mut retry_budget,
         "model",
         |target, target_attempt| {
-            let request = request.clone();
+            let request = Arc::clone(request);
             let model = model.to_string();
             let target = target.clone();
             async move {
@@ -358,7 +362,7 @@ async fn try_target(
     auth_start_index: Option<usize>,
     target_attempt: usize,
 ) -> Result<ExecuteResult, ProxyError> {
-    let body = request_with_model(request.body.clone(), model).map_err(|error| {
+    let body = request_with_model((*request.body).clone(), model).map_err(|error| {
         tracing::debug!(
             model = %model,
             provider = ?target.provider_type,
@@ -366,7 +370,7 @@ async fn try_target(
             config_index = target.config_index,
             base_url = config_base_url(&target.config),
             error = %error,
-            raw_request_body = %request.body,
+            raw_request_body = %request.body.as_ref(),
             "request body normalization failed"
         );
         error
@@ -374,7 +378,7 @@ async fn try_target(
     let provider_request = providers
         .prepare_request(
             target.provider_type,
-            body.clone(),
+            body,
             request.target,
             request.is_streaming,
         )
@@ -387,7 +391,7 @@ async fn try_target(
                 config_index = target.config_index,
                 base_url = config_base_url(&target.config),
                 error = %error,
-                raw_request_body = %body,
+                raw_request_body = %request.body.as_ref(),
                 "request conversion failed"
             );
             error
@@ -505,7 +509,7 @@ async fn try_image_target(
             clean_image_base_url(config.base_url)
         ))
         .headers(super::reqwest_headers(&headers)?)
-        .json(&request.body)
+        .json(request.body.as_ref())
         .send()
         .await
         .map_err(|error| {

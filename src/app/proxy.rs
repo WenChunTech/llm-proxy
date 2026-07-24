@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use bytes::Bytes;
 use futures_util::{StreamExt, TryStreamExt, stream};
 use salvo::{
@@ -82,13 +83,16 @@ async fn handle_model_request(
     };
 
     let snapshot = state.snapshot().await;
-    let (model, is_streaming, body) = match parse_model_request(req, target, request_body.clone()) {
-        Ok(parsed) => parsed,
-        Err(error) => {
-            render_error(res, error);
-            return;
-        }
-    };
+    let client_body = Arc::new(request_body);
+    let stream_context = StreamContext::from_request(target, client_body.as_ref());
+    let (model, is_streaming, body) =
+        match parse_model_request(req, target, (*client_body).clone()) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                render_error(res, error);
+                return;
+            }
+        };
 
     tracing::info!(
         target = ?target,
@@ -97,16 +101,15 @@ async fn handle_model_request(
         "request entry"
     );
 
-    let stream_context = StreamContext::from_request(target, &request_body);
     let exec_request = ExecuteRequest {
         target,
         model: model.clone(),
         is_streaming,
-        body: body.clone(),
+        body: Arc::new(body),
         forwarded_headers: get_forwardable_request_headers(req.headers()),
     };
 
-    match execute(&state, &snapshot, exec_request.clone()).await {
+    match execute(&state, &snapshot, exec_request).await {
         Ok(result) => {
             let dump = DebugDumpSession::begin(
                 &snapshot.config.debug_dump,
@@ -116,10 +119,11 @@ async fn handle_model_request(
             );
             // Dump the original client body before any protocol conversion.
             if let Some(session) = dump.as_ref() {
-                session.write_request(&request_body);
+                session.write_request(client_body.as_ref());
             }
             if let Err(error) =
-                write_execute_result(res, &state, exec_request, stream_context, result, dump).await
+                write_execute_result(res, &state, target, &model, stream_context, result, dump)
+                    .await
             {
                 render_error(res, error);
             }
@@ -130,7 +134,7 @@ async fn handle_model_request(
                 &DumpContext::new(&model, target, None, is_streaming),
                 Some(state.dump_hub.clone()),
             ) {
-                session.write_request(&request_body);
+                session.write_request(client_body.as_ref());
                 session.write_error(&error.to_string());
             }
             render_error(res, error);
@@ -155,7 +159,8 @@ async fn handle_image_generation(req: &mut Request, depot: &mut Depot, res: &mut
             return;
         }
     };
-    let Some(model) = body.get("model").and_then(Value::as_str) else {
+    let body = Arc::new(body);
+    let Some(model) = body.get("model").and_then(Value::as_str).map(str::to_string) else {
         render_error(
             res,
             ProxyError::InvalidRequest("model is required".to_string()),
@@ -169,8 +174,8 @@ async fn handle_image_generation(req: &mut Request, depot: &mut Depot, res: &mut
     );
 
     let request = ExecuteImageRequest {
-        model: model.to_string(),
-        body: body.clone(),
+        model: model.clone(),
+        body: Arc::clone(&body),
         forwarded_headers: get_forwardable_request_headers(req.headers()),
     };
 
@@ -178,12 +183,12 @@ async fn handle_image_generation(req: &mut Request, depot: &mut Depot, res: &mut
         Ok(result) => {
             let dump = DebugDumpSession::begin(
                 &snapshot.config.debug_dump,
-                &DumpContext::image(model, Some(result.provider_type))
+                &DumpContext::image(&model, Some(result.provider_type))
                     .with_status(result.response.status()),
                 Some(state.dump_hub.clone()),
             );
             if let Some(session) = dump.as_ref() {
-                session.write_request(&body);
+                session.write_request(body.as_ref());
             }
             apply_headers(res, result.response.headers());
             res.status_code(
@@ -194,10 +199,10 @@ async fn handle_image_generation(req: &mut Request, depot: &mut Depot, res: &mut
         Err(error) => {
             if let Some(session) = DebugDumpSession::begin(
                 &snapshot.config.debug_dump,
-                &DumpContext::image(model, None),
+                &DumpContext::image(&model, None),
                 Some(state.dump_hub.clone()),
             ) {
-                session.write_request(&body);
+                session.write_request(body.as_ref());
                 session.write_error(&error.to_string());
             }
             render_error(res, error);
@@ -238,7 +243,8 @@ fn parse_model_request(
 async fn write_execute_result(
     res: &mut Response,
     state: &AppState,
-    request: ExecuteRequest,
+    target: ProviderType,
+    model: &str,
     stream_context: StreamContext,
     result: crate::provider::executor::ExecuteResult,
     dump: Option<DebugDumpSession>,
@@ -256,7 +262,7 @@ async fn write_execute_result(
 
     match result.response {
         UpstreamResponse::NonStream { body, .. } => {
-            if result.provider_type == request.target {
+            if result.provider_type == target {
                 if let Some(session) = dump.as_ref() {
                     session.write_response_bytes(&body);
                 }
@@ -273,8 +279,8 @@ async fn write_execute_result(
             let json = bytes_to_json(body).map_err(|error| {
                 tracing::debug!(
                     source_provider = ?result.provider_type,
-                    target_provider = ?request.target,
-                    model = %request.model,
+                    target_provider = ?target,
+                    model = %model,
                     error = %error,
                     raw_response_body = %raw_response_body,
                     "response JSON parse failed"
@@ -283,12 +289,12 @@ async fn write_execute_result(
             })?;
             let converted = state
                 .providers
-                .convert_response(result.provider_type, json, request.target)
+                .convert_response(result.provider_type, json, target)
                 .map_err(|error| {
                     tracing::debug!(
                         source_provider = ?result.provider_type,
-                        target_provider = ?request.target,
-                        model = %request.model,
+                        target_provider = ?target,
+                        model = %model,
                         error = %error,
                         raw_response_body = %raw_response_body,
                         "response conversion failed"
@@ -299,7 +305,7 @@ async fn write_execute_result(
             Ok(())
         }
         UpstreamResponse::Stream { response, .. } => {
-            if result.provider_type == request.target {
+            if result.provider_type == target {
                 let stream = response.bytes_stream().map_err(std::io::Error::other);
                 res.stream(tee_stream(stream, dump));
                 return Ok(());
@@ -307,7 +313,7 @@ async fn write_execute_result(
 
             let converter = state.providers.stream_converter(
                 result.provider_type,
-                request.target,
+                target,
                 stream_context,
             );
             // converted_stream dumps raw upstream chunks; client still receives converted SSE.
@@ -315,8 +321,8 @@ async fn write_execute_result(
                 response,
                 converter,
                 result.provider_type,
-                request.target,
-                request.model,
+                target,
+                model.to_string(),
                 dump,
             );
             res.headers_mut().insert(

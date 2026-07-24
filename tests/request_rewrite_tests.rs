@@ -259,7 +259,7 @@ fn grok_dialect_rewrite_expands_and_filters_tools() {
     let names: Vec<_> = tools.iter().filter_map(tool_name).collect();
     assert!(names.contains(&"read_file"));
     assert!(names.contains(&"run_shell"));
-    assert!(!types.iter().any(|t| *t == "namespace"));
+    assert!(!types.contains(&"namespace"));
 }
 
 #[test]

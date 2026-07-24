@@ -111,30 +111,46 @@ impl AppState {
 
     pub async fn update_config(&self, config: Config) -> Result<(), ProxyError> {
         validate_config(&config)?;
-        let previous_log_level = self.snapshot().await.config.log_level.clone();
-        let mut inner = self.inner.write().await;
-        persist_config(&inner.persist, &config).await?;
+        // Persist outside the write lock so config I/O does not block readers/writers.
+        let (previous_log_level, persist) = {
+            let inner = self.inner.read().await;
+            (inner.config.log_level.clone(), inner.persist.clone())
+        };
+        persist_config(&persist, &config).await?;
+
         let config = Arc::new(config);
-        inner.registry = ProviderRegistry::new(config.clone());
-        inner.config = config;
+        let registry = ProviderRegistry::new(config.clone());
+        let log_level = config.log_level.clone();
+        let port = config.port;
+        let bind_addr = config.bind_addr();
+        let provider_configs = config.providers.iter_configs().len();
+        let configured_models = registry.configured_models().len();
+        let persist_label = persist.label();
+
+        {
+            let mut inner = self.inner.write().await;
+            inner.registry = registry;
+            inner.config = config;
+        }
         self.auth_cache.write().await.clear();
-        if inner.config.log_level != previous_log_level {
-            if let Err(error) = log_filter::apply_log_level(inner.config.log_level.as_deref()) {
+
+        if log_level != previous_log_level {
+            if let Err(error) = log_filter::apply_log_level(log_level.as_deref()) {
                 tracing::warn!(error = %error, "failed to hot-reload log filter");
             } else {
                 tracing::info!(
-                    log_level = inner.config.log_level.as_deref().unwrap_or("info"),
+                    log_level = log_level.as_deref().unwrap_or("info"),
                     "log filter reloaded"
                 );
             }
         }
         tracing::info!(
-            config_source = %inner.persist.label(),
-            port = inner.config.port,
-            bind = %inner.config.bind_addr(),
-            log_level = inner.config.log_level.as_deref().unwrap_or("info"),
-            provider_configs = inner.config.providers.iter_configs().len(),
-            configured_models = inner.registry.configured_models().len(),
+            config_source = %persist_label,
+            port,
+            bind = %bind_addr,
+            log_level = log_level.as_deref().unwrap_or("info"),
+            provider_configs,
+            configured_models,
             "configuration updated"
         );
         Ok(())

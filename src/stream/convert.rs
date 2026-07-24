@@ -55,7 +55,8 @@ impl StreamContext {
         }
 
         Self {
-            responses_request: serde_json::from_value(body.clone()).ok(),
+            // Deserialize from borrowed Value to avoid cloning large request bodies.
+            responses_request: serde::Deserialize::deserialize(body).ok(),
         }
     }
 }
