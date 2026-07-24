@@ -2,7 +2,9 @@ use llm_proxy::config::{
     BaseProviderConfig, CodexConfig, OneOrMany, OpenAiChatConfig, OpenAiResponsesConfig,
     ProviderConfig,
 };
-use llm_proxy::provider::credentials::{coverage_attempt_budget, credential_slot_count};
+use llm_proxy::provider::credentials::{
+    coverage_attempt_budget, credential_slot_count, provider_test_slot_count,
+};
 use llm_proxy::provider::executor::{
     clean_image_base_url, image_provider_config, rotate_attempt_targets, should_attempt,
 };
@@ -166,7 +168,37 @@ fn coverage_attempt_budget_covers_all_auth_slots_beyond_max_retries() {
 
     // api_key + 2 enabled auths = 3 slots; disabled auth ignored.
     assert_eq!(credential_slot_count(&target), 3);
+    // Model testing with api_key only exercises the api_key itself.
+    assert_eq!(provider_test_slot_count(&target), 1);
     assert_eq!(coverage_attempt_budget(&[target], 1), 3);
+}
+
+#[test]
+fn provider_test_slot_count_covers_all_auth_when_api_key_missing() {
+    let base = BaseProviderConfig {
+        enabled: true,
+        models: vec!["m".to_string()],
+        base_url: "https://codex.example/v1".to_string(),
+        api_key: String::new(),
+        headers: Default::default(),
+    };
+    let target = AttemptTarget {
+        provider_type: ProviderType::Codex,
+        provider_index: 0,
+        config_index: 0,
+        config: ProviderConfig::Codex(CodexConfig {
+            base,
+            auth: serde_json::from_value(serde_json::json!([
+                { "access_token": "a" },
+                { "access_token": "b" },
+                { "access_token": "c", "disabled": true }
+            ]))
+            .unwrap(),
+        }),
+    };
+
+    assert_eq!(credential_slot_count(&target), 2);
+    assert_eq!(provider_test_slot_count(&target), 2);
 }
 
 #[test]

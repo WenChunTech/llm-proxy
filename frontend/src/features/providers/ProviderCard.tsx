@@ -29,6 +29,8 @@ export function ProviderCard({
   authStats,
   authTargets,
   onValidateAuth,
+  authValidating = false,
+  authProgress = null,
 }: {
   provider: Provider
   priorityIndex?: number
@@ -45,6 +47,8 @@ export function ProviderCard({
   authStats?: ProviderAuthStats
   authTargets?: AuthValidationTarget[]
   onValidateAuth?: (kind: AuthProviderKind, targets: AuthValidationTarget[]) => void
+  authValidating?: boolean
+  authProgress?: { completed: number; total: number; label: string } | null
 }) {
   const meta = providerMeta[provider.kind]
   const effectiveBaseUrl = effectiveBaseUrlForProvider(provider)
@@ -155,6 +159,31 @@ export function ProviderCard({
                 {authStats.unchecked > 0 && <span className="auth-stat unchecked">待校验 <b>{authStats.unchecked}</b></span>}
                 <span className="auth-stat disabled">禁用 <b>{authStats.disabled}</b></span>
               </div>
+              {authValidating && (
+                <div className="provider-auth-progress" aria-live="polite">
+                  <div className="provider-auth-progress-row">
+                    <strong>校验中</strong>
+                    <code>
+                      {authProgress && authProgress.total > 0
+                        ? `${authProgress.completed}/${authProgress.total}`
+                        : '…'}
+                    </code>
+                  </div>
+                  <div className="provider-auth-progress-meter" aria-hidden="true">
+                    <span
+                      style={{
+                        width:
+                          authProgress && authProgress.total > 0
+                            ? `${Math.min(100, (authProgress.completed / authProgress.total) * 100)}%`
+                            : '12%',
+                      }}
+                    />
+                  </div>
+                  {authProgress?.label ? (
+                    <span className="provider-auth-progress-label">{authProgress.label}</span>
+                  ) : null}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -171,11 +200,16 @@ export function ProviderCard({
           <button
             className="button button-secondary compact-model-sync-button"
             type="button"
+            disabled={authValidating}
             onClick={() => onValidateAuth?.(provider.kind as AuthProviderKind, authTargets ?? [])}
-            title="校验当前配置"
+            title={authValidating ? '校验进行中' : '校验当前配置'}
           >
-            <Icon name="check" size={15} />
-            校验
+            <Icon name={authValidating ? 'pulse' : 'check'} size={15} />
+            {authValidating
+              ? authProgress && authProgress.total > 0
+                ? `${authProgress.completed}/${authProgress.total}`
+                : '校验中'
+              : '校验'}
           </button>
         )}
         <button className={`toggle ${provider.enabled ? 'on' : ''}`} type="button" aria-label={provider.enabled ? '停用提供商' : '启用提供商'} onClick={() => onToggle(provider.id)}><span /></button>

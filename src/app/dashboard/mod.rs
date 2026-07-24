@@ -1,22 +1,25 @@
 mod auth_helpers;
 mod config;
 mod endpoints;
+mod logs;
 mod provider_models;
 mod provider_test;
 mod types;
 mod validation;
+mod validation_ws;
 
 pub use endpoints::{build_provider_models_endpoint, build_provider_responses_endpoint};
+pub(super) use logs::{
+    api_debug_dump_detail, api_debug_dump_file, api_debug_dumps, api_logs_snapshot, api_logs_ws,
+};
 pub use types::DashboardAuthProvider;
 pub use validation::validation_auth_base_url;
+pub(super) use validation_ws::{api_validate_codex_auths_ws, api_validate_grok_auths_ws};
 
 use salvo::prelude::*;
 use serde_json::json;
 
-use crate::{
-    error::ProxyError,
-    provider::types::ProviderType,
-};
+use crate::{error::ProxyError, provider::types::ProviderType};
 
 use super::{JSON_MAX_SIZE, render_error, state_from_depot};
 use config::config_payload;
@@ -25,9 +28,7 @@ use provider_models::fetch_provider_models;
 use provider_test::{
     stream_provider_model, test_provider_model, write_provider_test_stream_response,
 };
-use types::{
-    AuthValidateRequest, DashboardConfig, ProviderModelsRequest, ProviderTestRequest,
-};
+use types::{AuthValidateRequest, DashboardConfig, ProviderModelsRequest, ProviderTestRequest};
 use validation::validate_auths;
 
 #[handler]
@@ -217,4 +218,3 @@ pub(super) async fn api_validate_grok_auths(
         Err(error) => render_error(res, error),
     }
 }
-

@@ -13,6 +13,9 @@ pub(super) struct DashboardPayload {
     pub retry: DashboardRetry,
     pub api_key: String,
     pub api_key_enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_level: Option<String>,
+    pub debug_dump: DashboardDebugDump,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -27,6 +30,11 @@ pub(super) struct DashboardConfig {
     pub retry: DashboardRetry,
     #[serde(default)]
     pub api_key: Option<String>,
+    /// When present, replaces the configured log level. Empty string clears it.
+    #[serde(default)]
+    pub log_level: Option<String>,
+    #[serde(default)]
+    pub debug_dump: Option<DashboardDebugDump>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -170,6 +178,12 @@ pub(super) enum ProviderTestStreamResponse {
 pub(super) struct DashboardRetry {
     pub max_retries: usize,
     pub backoff_step_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub(super) struct DashboardDebugDump {
+    pub enabled: bool,
+    pub dir: String,
 }
 
 pub(super) fn default_provider_test_stream() -> bool {

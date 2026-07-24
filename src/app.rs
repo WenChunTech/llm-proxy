@@ -33,7 +33,15 @@ pub fn router(state: AppState) -> Router {
                 .push(Router::with_path("models").get(dashboard::api_models))
                 .push(Router::with_path("provider-models").post(dashboard::api_provider_models))
                 .push(Router::with_path("codex/validate").post(dashboard::api_validate_codex_auths))
+                .push(
+                    Router::with_path("codex/validate/ws")
+                        .goal(dashboard::api_validate_codex_auths_ws),
+                )
                 .push(Router::with_path("grok/validate").post(dashboard::api_validate_grok_auths))
+                .push(
+                    Router::with_path("grok/validate/ws")
+                        .goal(dashboard::api_validate_grok_auths_ws),
+                )
                 .push(
                     Router::with_path("settings/codex/validate")
                         .post(dashboard::api_validate_codex_auths),
@@ -42,7 +50,15 @@ pub fn router(state: AppState) -> Router {
                     Router::with_path("settings/grok/validate")
                         .post(dashboard::api_validate_grok_auths),
                 )
-                .push(Router::with_path("provider-test").post(dashboard::api_provider_test)),
+                .push(Router::with_path("provider-test").post(dashboard::api_provider_test))
+                .push(Router::with_path("logs").get(dashboard::api_logs_snapshot))
+                .push(Router::with_path("logs/ws").goal(dashboard::api_logs_ws))
+                .push(Router::with_path("debug-dumps").get(dashboard::api_debug_dumps))
+                .push(Router::with_path("debug-dumps/{id}").get(dashboard::api_debug_dump_detail))
+                .push(
+                    Router::with_path("debug-dumps/{id}/files/{file}")
+                        .get(dashboard::api_debug_dump_file),
+                ),
         )
         .push(
             Router::with_path("v1")

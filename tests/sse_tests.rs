@@ -19,4 +19,3 @@ fn buffers_partial_lines() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].data, "{\"a\":1}");
 }
-

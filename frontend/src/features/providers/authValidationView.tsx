@@ -131,6 +131,7 @@ export function AuthValidationResultRow({
   kind,
   result,
   disabled,
+  validating = false,
   onValidate,
   onDisable,
   onDelete,
@@ -138,16 +139,19 @@ export function AuthValidationResultRow({
   kind: AuthProviderKind
   result: AuthValidationState['payload']['results'][number]
   disabled: boolean
+  validating?: boolean
   onValidate: (kind: AuthProviderKind, target: AuthValidationTarget) => void
   onDisable: (kind: AuthProviderKind, target: AuthValidationTarget, disabled: boolean) => void
   onDelete: (kind: AuthProviderKind, target: AuthValidationTarget) => void
 }) {
   const target = { providerIndex: result.providerIndex, authIndex: result.authIndex }
-  const statusClass = result.reason === 'rate_limited'
-    ? 'skipped'
-    : result.valid ? 'ok' : result.skipped ? 'skipped' : 'error'
+  const statusClass = validating
+    ? 'pending'
+    : result.reason === 'rate_limited'
+      ? 'skipped'
+      : result.valid ? 'ok' : result.skipped ? 'skipped' : 'error'
   return (
-    <div className="auth-validation-result-row">
+    <div className={`auth-validation-result-row ${validating ? 'is-validating' : ''}`}>
       <div className="auth-validation-result-main">
         <span className={`status-dot ${statusClass}`} />
         <div>
@@ -164,16 +168,34 @@ export function AuthValidationResultRow({
         {result.refreshed && <span>已刷新</span>}
         {result.reason === 'rate_limited' && result.disabled && <span>已自动禁用</span>}
         {result.disabled && <span>已禁用</span>}
-        {result.errorMessage && <span className="auth-validation-error">{result.errorMessage}</span>}
+        {validating && <span className="auth-validation-running">校验中…</span>}
+        {result.errorMessage && !validating && <span className="auth-validation-error">{result.errorMessage}</span>}
       </div>
       <div className="auth-validation-row-actions">
-        <button className="icon-button subtle" type="button" title="重新校验" disabled={disabled} onClick={() => onValidate(kind, target)}>
-          <Icon name="check" size={15} />
+        <button
+          className="icon-button subtle"
+          type="button"
+          title={validating ? '校验中' : '重新校验'}
+          disabled={disabled || validating}
+          onClick={() => onValidate(kind, target)}
+        >
+          <Icon name={validating ? 'pulse' : 'check'} size={15} />
         </button>
-        <button className="button button-secondary compact-model-sync-button" type="button" onClick={() => onDisable(kind, target, !result.disabled)}>
+        <button
+          className="button button-secondary compact-model-sync-button"
+          type="button"
+          disabled={validating}
+          onClick={() => onDisable(kind, target, !result.disabled)}
+        >
           {result.disabled ? '启用' : '禁用'}
         </button>
-        <button className="icon-button danger-button" type="button" title="删除 auth" onClick={() => onDelete(kind, target)}>
+        <button
+          className="icon-button danger-button"
+          type="button"
+          title="删除 auth"
+          disabled={validating}
+          onClick={() => onDelete(kind, target)}
+        >
           <Icon name="trash" size={15} />
         </button>
       </div>

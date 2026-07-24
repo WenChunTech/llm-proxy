@@ -2,15 +2,20 @@ use std::{fs, path::PathBuf};
 
 use llm_proxy::config::{Config, ConfigPersist, LoadedConfig, UpstashRedis};
 use llm_proxy::state::AppState;
+use llm_proxy::util::{DumpHub, LogHub};
 
 #[tokio::test]
 async fn update_config_creates_missing_config_file_and_updates_runtime_state() {
     let path = unique_config_path("update-config-creates-missing-file");
     let parent = path.parent().unwrap().to_path_buf();
-    let state = AppState::from_loaded(LoadedConfig {
-        config: Config::default(),
-        persist: ConfigPersist::File(path.clone()),
-    })
+    let state = AppState::from_loaded(
+        LoadedConfig {
+            config: Config::default(),
+            persist: ConfigPersist::File(path.clone()),
+        },
+        LogHub::new(),
+        DumpHub::new(),
+    )
     .unwrap();
     let next = Config {
         port: 4567,
@@ -38,10 +43,14 @@ async fn update_config_writes_to_redis_when_redis_persist_is_configured() {
         "llm-proxy:config",
         Some(r#"{"port": 1}"#.to_string()),
     );
-    let state = AppState::from_loaded(LoadedConfig {
-        config: Config::default(),
-        persist: ConfigPersist::Redis(redis.clone()),
-    })
+    let state = AppState::from_loaded(
+        LoadedConfig {
+            config: Config::default(),
+            persist: ConfigPersist::Redis(redis.clone()),
+        },
+        LogHub::new(),
+        DumpHub::new(),
+    )
     .unwrap();
     let next = Config {
         port: 7654,
@@ -68,4 +77,3 @@ fn unique_config_path(name: &str) -> PathBuf {
         .join(format!("llm-proxy-{name}-{}-{nanos}", std::process::id()))
         .join("config.json")
 }
-

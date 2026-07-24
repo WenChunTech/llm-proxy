@@ -7,7 +7,9 @@ use crate::{
     state::AppSnapshot,
 };
 
-use super::types::{DashboardConfig, DashboardPayload, DashboardProvider, DashboardRetry};
+use super::types::{
+    DashboardConfig, DashboardDebugDump, DashboardPayload, DashboardProvider, DashboardRetry,
+};
 
 pub(super) fn config_payload(snapshot: &AppSnapshot) -> DashboardPayload {
     DashboardPayload {
@@ -26,6 +28,11 @@ pub(super) fn config_payload(snapshot: &AppSnapshot) -> DashboardPayload {
             .api_key
             .as_deref()
             .is_some_and(|key| !key.trim().is_empty()),
+        log_level: snapshot.config.log_level.clone(),
+        debug_dump: DashboardDebugDump {
+            enabled: snapshot.config.debug_dump.enabled,
+            dir: snapshot.config.debug_dump.dir.clone(),
+        },
     }
 }
 
@@ -59,7 +66,6 @@ pub(crate) fn models_payload(snapshot: &AppSnapshot) -> Value {
     }
     json!({ "object": "list", "data": data })
 }
-
 
 fn dashboard_providers(config: &Config) -> Vec<DashboardProvider> {
     let mut providers = Vec::new();
@@ -142,6 +148,23 @@ impl DashboardConfig {
             .filter(|value| !value.is_empty());
         config.retry.max_retries = self.retry.max_retries;
         config.retry.backoff_step_ms = self.retry.backoff_step_ms;
+        if let Some(log_level) = self.log_level {
+            let trimmed = log_level.trim().to_string();
+            config.log_level = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            };
+        }
+        if let Some(debug_dump) = self.debug_dump {
+            config.debug_dump.enabled = debug_dump.enabled;
+            let dir = debug_dump.dir.trim();
+            config.debug_dump.dir = if dir.is_empty() {
+                "logs".to_string()
+            } else {
+                dir.to_string()
+            };
+        }
 
         let providers = self.providers.into_iter().filter_map(|provider| {
             match provider.persisted_provider_config() {
@@ -271,4 +294,3 @@ where
         ))
     }
 }
-

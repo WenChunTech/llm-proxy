@@ -3221,3 +3221,65 @@ code {
     text-align: center;
   }
 }
+
+/* ---- Auth validation progress ---- */
+.provider-auth-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.provider-auth-progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--teal);
+  font-size: 12px;
+}
+
+.provider-auth-progress-row code {
+  color: var(--teal);
+}
+
+.provider-auth-progress-meter {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(13, 146, 125, 0.12);
+}
+
+.provider-auth-progress-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--status-ok), var(--teal));
+  transition: width 180ms ease;
+}
+
+.provider-auth-progress-label {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-validation-result-row.is-validating {
+  border-color: var(--teal-border);
+  background: var(--teal-soft);
+}
+
+.auth-validation-running {
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.status-dot.pending {
+  background: var(--status-warn);
+  box-shadow: 0 0 0 3px var(--status-warn-soft);
+}

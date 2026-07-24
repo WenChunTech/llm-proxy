@@ -110,27 +110,16 @@ async fn handle_model_request(
         Ok(result) => {
             let dump = DebugDumpSession::begin(
                 &snapshot.config.debug_dump,
-                &DumpContext::new(
-                    &model,
-                    target,
-                    Some(result.provider_type),
-                    is_streaming,
-                )
-                .with_status(result.response.status()),
+                &DumpContext::new(&model, target, Some(result.provider_type), is_streaming)
+                    .with_status(result.response.status()),
+                Some(state.dump_hub.clone()),
             );
             // Dump the original client body before any protocol conversion.
             if let Some(session) = dump.as_ref() {
                 session.write_request(&request_body);
             }
-            if let Err(error) = write_execute_result(
-                res,
-                &state,
-                exec_request,
-                stream_context,
-                result,
-                dump,
-            )
-            .await
+            if let Err(error) =
+                write_execute_result(res, &state, exec_request, stream_context, result, dump).await
             {
                 render_error(res, error);
             }
@@ -139,6 +128,7 @@ async fn handle_model_request(
             if let Some(session) = DebugDumpSession::begin(
                 &snapshot.config.debug_dump,
                 &DumpContext::new(&model, target, None, is_streaming),
+                Some(state.dump_hub.clone()),
             ) {
                 session.write_request(&request_body);
                 session.write_error(&error.to_string());
@@ -190,6 +180,7 @@ async fn handle_image_generation(req: &mut Request, depot: &mut Depot, res: &mut
                 &snapshot.config.debug_dump,
                 &DumpContext::image(model, Some(result.provider_type))
                     .with_status(result.response.status()),
+                Some(state.dump_hub.clone()),
             );
             if let Some(session) = dump.as_ref() {
                 session.write_request(&body);
@@ -201,9 +192,11 @@ async fn handle_image_generation(req: &mut Request, depot: &mut Depot, res: &mut
             write_passthrough_response(res, result.response, dump);
         }
         Err(error) => {
-            if let Some(session) =
-                DebugDumpSession::begin(&snapshot.config.debug_dump, &DumpContext::image(model, None))
-            {
+            if let Some(session) = DebugDumpSession::begin(
+                &snapshot.config.debug_dump,
+                &DumpContext::image(model, None),
+                Some(state.dump_hub.clone()),
+            ) {
                 session.write_request(&body);
                 session.write_error(&error.to_string());
             }
@@ -393,55 +386,55 @@ fn converted_stream(
                                 session.append_response_chunk(&bytes);
                             }
                             match parser.push(&bytes) {
-                            Ok(events) => {
-                                tracing::debug!(
-                                    source_provider = ?source_provider,
-                                    target_provider = ?target_provider,
-                                    model = %model.as_ref(),
-                                    raw_response_chunk = %String::from_utf8_lossy(&bytes),
-                                    "upstream raw response chunk"
-                                );
-                                match convert_events(&mut converter, events) {
-                                    Ok(mut out) => {
-                                        out.reverse();
-                                        if let Some(bytes) = out.pop() {
+                                Ok(events) => {
+                                    tracing::debug!(
+                                        source_provider = ?source_provider,
+                                        target_provider = ?target_provider,
+                                        model = %model.as_ref(),
+                                        raw_response_chunk = %String::from_utf8_lossy(&bytes),
+                                        "upstream raw response chunk"
+                                    );
+                                    match convert_events(&mut converter, events) {
+                                        Ok(mut out) => {
+                                            out.reverse();
+                                            if let Some(bytes) = out.pop() {
+                                                return Some((
+                                                    Ok(bytes),
+                                                    (upstream, parser, converter, out, finished),
+                                                ));
+                                            }
+                                        }
+                                        Err(error) => {
+                                            tracing::warn!(
+                                                source_provider = ?source_provider,
+                                                target_provider = ?target_provider,
+                                                model = %model.as_ref(),
+                                                error = %error,
+                                                "stream response conversion failed"
+                                            );
                                             return Some((
-                                                Ok(bytes),
-                                                (upstream, parser, converter, out, finished),
+                                                Err(std::io::Error::other(error)),
+                                                (upstream, parser, converter, pending, true),
                                             ));
                                         }
                                     }
-                                    Err(error) => {
-                                        tracing::warn!(
-                                            source_provider = ?source_provider,
-                                            target_provider = ?target_provider,
-                                            model = %model.as_ref(),
-                                            error = %error,
-                                            "stream response conversion failed"
-                                        );
-                                        return Some((
-                                            Err(std::io::Error::other(error)),
-                                            (upstream, parser, converter, pending, true),
-                                        ));
-                                    }
+                                }
+                                Err(error) => {
+                                    tracing::warn!(
+                                        source_provider = ?source_provider,
+                                        target_provider = ?target_provider,
+                                        model = %model.as_ref(),
+                                        error = %error,
+                                        raw_response_chunk = %String::from_utf8_lossy(&bytes),
+                                        "stream response parse failed"
+                                    );
+                                    return Some((
+                                        Err(std::io::Error::other(error)),
+                                        (upstream, parser, converter, pending, true),
+                                    ));
                                 }
                             }
-                            Err(error) => {
-                                tracing::warn!(
-                                    source_provider = ?source_provider,
-                                    target_provider = ?target_provider,
-                                    model = %model.as_ref(),
-                                    error = %error,
-                                    raw_response_chunk = %String::from_utf8_lossy(&bytes),
-                                    "stream response parse failed"
-                                );
-                                return Some((
-                                    Err(std::io::Error::other(error)),
-                                    (upstream, parser, converter, pending, true),
-                                ));
-                            }
-                            }
-                        },
+                        }
                         Some(Err(error)) => {
                             tracing::warn!(
                                 source_provider = ?source_provider,

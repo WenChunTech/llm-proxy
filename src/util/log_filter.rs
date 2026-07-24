@@ -1,14 +1,25 @@
 //! EnvFilter helpers for quiet dependency logs (h2, hyper, etc.).
 
-use tracing_subscriber::EnvFilter;
+use std::sync::OnceLock;
+
+use tracing_subscriber::{EnvFilter, Registry, reload};
 
 /// Crates/targets that should follow the configured application log level.
 const APP_TARGETS: &[&str] = &["llm_proxy", "converter", "slave"];
 
+type FilterReloadHandle = reload::Handle<EnvFilter, Registry>;
+
+static FILTER_RELOAD: OnceLock<FilterReloadHandle> = OnceLock::new();
+
+/// Install the reload handle created during `init_tracing`.
+pub fn install_reload_handle(handle: FilterReloadHandle) {
+    let _ = FILTER_RELOAD.set(handle);
+}
+
 /// Resolve the runtime filter.
 ///
 /// Priority:
-/// 1. `RUST_LOG` when set (full manual control)
+/// 1. `RUST_LOG` when set (full manual control at startup)
 /// 2. `log_level` from config
 ///
 /// A bare level such as `debug` / `info` is expanded to only enable this
@@ -21,6 +32,26 @@ pub fn resolve_env_filter(
         Ok(filter) => Ok(filter),
         Err(_) => EnvFilter::try_new(expand_log_level(log_level.unwrap_or("info"))),
     }
+}
+
+/// Build an EnvFilter from a config `log_level` value (always expanded / parsed).
+pub fn filter_from_log_level(
+    log_level: Option<&str>,
+) -> Result<EnvFilter, tracing_subscriber::filter::ParseError> {
+    EnvFilter::try_new(expand_log_level(log_level.unwrap_or("info")))
+}
+
+/// Hot-reload the process filter after a dashboard config change.
+///
+/// When the reload handle is missing (e.g. unit tests), this is a no-op.
+pub fn apply_log_level(log_level: Option<&str>) -> Result<(), String> {
+    let Some(handle) = FILTER_RELOAD.get() else {
+        return Ok(());
+    };
+    let filter = filter_from_log_level(log_level).map_err(|error| error.to_string())?;
+    handle
+        .reload(filter)
+        .map_err(|error| format!("reload log filter failed: {error}"))
 }
 
 /// Expand a config `log_level` value into an EnvFilter directive string.
@@ -67,10 +98,7 @@ mod tests {
 
     #[test]
     fn full_directive_is_preserved() {
-        assert_eq!(
-            expand_log_level("debug,h2=trace"),
-            "debug,h2=trace"
-        );
+        assert_eq!(expand_log_level("debug,h2=trace"), "debug,h2=trace");
         assert_eq!(
             expand_log_level("llm_proxy=trace,h2=off"),
             "llm_proxy=trace,h2=off"
@@ -89,5 +117,10 @@ mod tests {
     fn expanded_directive_parses() {
         EnvFilter::try_new(expand_log_level("debug")).unwrap();
         EnvFilter::try_new(expand_log_level("llm_proxy=debug,h2=off")).unwrap();
+    }
+
+    #[test]
+    fn apply_without_handle_is_ok() {
+        apply_log_level(Some("info")).unwrap();
     }
 }

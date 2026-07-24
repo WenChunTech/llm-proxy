@@ -7,6 +7,7 @@ import type { Provider, ProviderKindFilter, ThemeMode, View } from '../../types/
 const pageTitle: Record<View, string> = {
   providers: '提供商',
   routing: '模型路由',
+  logs: '请求日志',
 }
 
 export function AppShell({
@@ -93,6 +94,12 @@ export function AppShell({
             label="模型路由"
             active={view === 'routing'}
             onClick={() => setView('routing')}
+          />
+          <NavItem
+            icon="terminal"
+            label="请求日志"
+            active={view === 'logs'}
+            onClick={() => setView('logs')}
           />
         </nav>
 

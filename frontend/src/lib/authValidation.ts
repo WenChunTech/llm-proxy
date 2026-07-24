@@ -48,7 +48,21 @@ export function applyAuthValidationResults(
     const providerResults = byProvider.get(providerIndex)
     if (!providerResults?.length) return provider
     const shouldEnableProvider = providerResults.some(shouldEnableAuthFromResult)
-    const usesArray = providerResults.some((result) => result.isAuthArray) || Array.isArray(provider.auth)
+    const originalItems = Array.isArray(provider.auth)
+      ? [...provider.auth]
+      : provider.auth !== undefined && provider.auth !== null
+        ? [provider.auth]
+        : []
+    const maxAuthIndex = Math.max(...providerResults.map((result) => result.authIndex), -1)
+    const hintedCount = Math.max(...providerResults.map((result) => result.authCount), 0)
+    // Never collapse multi-auth down to a single object after failed validation/save.
+    const usesArray =
+      providerResults.some((result) => result.isAuthArray) ||
+      Array.isArray(provider.auth) ||
+      providerResults.length > 1 ||
+      maxAuthIndex > 0 ||
+      hintedCount > 1 ||
+      originalItems.length > 1
     if (!usesArray) {
       return {
         ...provider,
@@ -56,14 +70,26 @@ export function applyAuthValidationResults(
         auth: normalizedAuthFromValidationResult(providerResults[0]),
       }
     }
-    const currentItems = Array.isArray(provider.auth) ? [...provider.auth] : provider.auth ? [provider.auth] : []
+    const currentItems = originalItems.length ? [...originalItems] : []
     for (const result of providerResults) {
+      if (result.authIndex < 0) continue
+      // Grow only as far as reported indices require, preserving sibling slots.
+      while (currentItems.length <= result.authIndex) {
+        currentItems.push(undefined)
+      }
       currentItems[result.authIndex] = normalizedAuthFromValidationResult(result)
+    }
+    const nextAuth = currentItems.map((item, index) =>
+      item === undefined ? originalItems[index] : item,
+    )
+    // Drop only trailing empty slots; never compact middle entries (would renumber auth).
+    while (nextAuth.length > 0 && nextAuth[nextAuth.length - 1] === undefined) {
+      nextAuth.pop()
     }
     return {
       ...provider,
       enabled: shouldEnableProvider ? true : provider.enabled,
-      auth: currentItems,
+      auth: nextAuth,
     }
   })
 }

@@ -360,4 +360,3 @@ fn debug_dump_config_defaults_and_parses() {
     assert!(config.debug_dump.enabled);
     assert_eq!(config.debug_dump.dir, "req");
 }
-

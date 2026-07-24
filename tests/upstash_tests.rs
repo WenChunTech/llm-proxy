@@ -53,4 +53,3 @@ fn parses_pipeline_mixed_uses_first_command() {
     let err = parse_get_result(r#"[{"error":"ERR boom"},{"result":"x"}]"#).unwrap_err();
     assert!(err.to_string().contains("ERR boom"));
 }
-

@@ -460,7 +460,7 @@ export function ProviderModal({
                   <span className="model-sync-status muted-copy">{authError}</span>
                 ) : (
                   <span className="model-sync-status muted-copy">
-                    可与 API Key 同时配置；请求失败时会轮询 API Key 与全部 enabled auth
+                    可与 API Key 同时配置；运行时失败会轮询 API Key 与 enabled auth。模型测试在已配置 API Key 时仅测 API Key
                   </span>
                 )}
               </div>

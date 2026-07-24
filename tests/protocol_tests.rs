@@ -34,4 +34,3 @@ fn protocol_conversion_matrix_excludes_provider_aliases() {
             )
     );
 }
-

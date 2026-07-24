@@ -5,13 +5,11 @@
 //! - https://docs.x.ai/developers/tools/web-search
 //! - https://docs.x.ai/developers/tools/x-search
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::ProxyError;
 
-use super::helpers::{
-    allow_tool_types, expand_namespace_tools, map_tool_types, tools_array_mut,
-};
+use super::helpers::{allow_tool_types, expand_namespace_tools, map_tool_types, tools_array_mut};
 
 /// Grok dialect: expand namespaces, normalize tool aliases, allowlist tools,
 /// adapt search tools to the xAI Responses shape, and ensure `x_search`.
@@ -85,9 +83,7 @@ fn adapt_web_search_tools(body: &mut Value) -> Result<(), ProxyError> {
             let wants_image = types.iter().any(|v| v.as_str() == Some("image"));
             if wants_image && obj.get("enable_image_search").is_none() {
                 obj.insert("enable_image_search".to_string(), Value::Bool(true));
-                tracing::debug!(
-                    "mapped search_content_types image -> enable_image_search=true"
-                );
+                tracing::debug!("mapped search_content_types image -> enable_image_search=true");
             }
         }
 
@@ -266,9 +262,9 @@ fn ensure_x_search_tool(body: &mut Value) -> Result<(), ProxyError> {
         return Ok(());
     };
 
-    let has_x_search = tools.iter().any(|tool| {
-        tool.get("type").and_then(Value::as_str) == Some("x_search")
-    });
+    let has_x_search = tools
+        .iter()
+        .any(|tool| tool.get("type").and_then(Value::as_str) == Some("x_search"));
     if has_x_search {
         return Ok(());
     }

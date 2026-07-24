@@ -11,6 +11,7 @@ import { ApiKeyModal } from './features/modals/ApiKeyModal'
 import { FallbackModelModal } from './features/modals/FallbackModelModal'
 import { ProviderModal } from './features/modals/ProviderModal'
 import { ProvidersView } from './features/providers/ProvidersView'
+import { LogsView } from './features/logs/LogsView'
 import { RoutingView } from './features/routing/RoutingView'
 import { useAuthValidation } from './hooks/useAuthValidation'
 import { useDashboardConfig } from './hooks/useDashboardConfig'
@@ -143,7 +144,10 @@ function App() {
             onReorderProvider={config.reorderProviderConfig}
             onAdd={() => openEditor(undefined, providerKindFilter === 'all' ? undefined : providerKindFilter)}
             onValidateAuths={authValidation.validateAuthTargets}
-            validatingAuthKind={authValidation.validatingAuthKind}
+            isKindValidating={authValidation.isKindValidating}
+            isProviderValidating={authValidation.isProviderValidating}
+            isTargetValidating={authValidation.isTargetValidating}
+            providerValidationProgress={authValidation.providerValidationProgress}
             authValidation={authValidation.authValidation}
             onAuthValidationFilterChange={authValidation.setAuthValidationFilter}
             onValidateVisibleAuths={authValidation.validateVisibleAuthResults}
@@ -174,6 +178,20 @@ function App() {
             onAddFallbackModel={config.addFallbackModel}
             onAddFallback={() => setShowAddFallback(true)}
             onUpdateModelAliases={config.updateModelAliases}
+          />
+        )}
+        {view === 'logs' && (
+          <LogsView
+            accessKey={config.accessKey}
+            logLevel={config.logLevel}
+            debugDump={config.debugDump}
+            isSaving={config.isSaving}
+            onSaveLoggingConfig={(next) =>
+              void config.persistConfig({
+                logLevel: next.logLevel,
+                debugDump: next.debugDump,
+              })
+            }
           />
         )}
       </AppShell>

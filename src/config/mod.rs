@@ -7,7 +7,6 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing_subscriber::EnvFilter;
 
 use crate::{error::ProxyError, provider::types::ProviderType};
 
@@ -536,7 +535,7 @@ pub fn validate_config(config: &Config) -> Result<(), ProxyError> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        EnvFilter::try_new(log_level).map_err(|error| {
+        crate::util::log_filter::filter_from_log_level(Some(log_level)).map_err(|error| {
             ProxyError::Config(format!("invalid log_level '{log_level}': {error}"))
         })?;
     }

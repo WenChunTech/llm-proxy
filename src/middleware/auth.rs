@@ -64,8 +64,31 @@ fn request_api_key(req: &Request) -> String {
 
     for name in ["x-api-key", "x-goog-api-key"] {
         if let Some(value) = req.headers().get(name).and_then(|v| v.to_str().ok()) {
-            return value.to_string();
+            let value = value.trim();
+            if !value.is_empty() {
+                return value.to_string();
+            }
+        }
+    }
+
+    // Browser WebSocket clients cannot set Authorization headers. Accept token
+    // query params only for WebSocket upgrade requests used by the dashboard.
+    if is_websocket_upgrade(req) {
+        for name in ["token", "access_token", "api_key"] {
+            if let Some(value) = req.query::<String>(name) {
+                let value = value.trim();
+                if !value.is_empty() {
+                    return value.to_string();
+                }
+            }
         }
     }
     String::new()
+}
+
+fn is_websocket_upgrade(req: &Request) -> bool {
+    req.headers()
+        .get("upgrade")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
 }

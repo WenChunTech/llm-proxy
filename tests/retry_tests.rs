@@ -12,4 +12,3 @@ fn returns_fallback_tail_for_configured_model() {
     assert!(fallback_chain("c", &config).unwrap().is_empty());
     assert!(fallback_chain("x", &config).unwrap().is_empty());
 }
-

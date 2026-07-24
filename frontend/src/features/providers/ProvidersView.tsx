@@ -8,7 +8,6 @@ import type {
   AuthValidationState,
   AuthValidationTarget,
   Provider,
-  ProviderKind,
   ProviderKindFilter,
 } from '../../types/domain'
 import { ProviderCard } from './ProviderCard'
@@ -40,7 +39,10 @@ export function ProvidersView({
   onMoveProvider,
   onReorderProvider,
   onValidateAuths,
-  validatingAuthKind,
+  isKindValidating,
+  isProviderValidating,
+  isTargetValidating,
+  providerValidationProgress,
   authValidation,
   onAuthValidationFilterChange,
   onValidateVisibleAuths,
@@ -66,7 +68,13 @@ export function ProvidersView({
   onMoveProvider: (id: string, action: ListMoveAction) => void
   onReorderProvider: (sourceId: string, targetId: string) => void
   onValidateAuths: (kind: AuthProviderKind, targets?: AuthValidationTarget[]) => void
-  validatingAuthKind: ProviderKind | null
+  isKindValidating: (kind: AuthProviderKind) => boolean
+  isProviderValidating: (kind: AuthProviderKind, providerIndex: number) => boolean
+  isTargetValidating: (kind: AuthProviderKind, target: AuthValidationTarget) => boolean
+  providerValidationProgress: (
+    kind: AuthProviderKind,
+    providerIndex: number,
+  ) => { completed: number; total: number; label: string } | null
   authValidation: AuthValidationState | null
   onAuthValidationFilterChange: (filter: AuthValidationFilter) => void
   onValidateVisibleAuths: () => void
@@ -148,11 +156,11 @@ export function ProvidersView({
                     <button
                       className="button button-secondary compact-model-sync-button"
                       type="button"
-                      disabled={validatingAuthKind === kind}
+                      disabled={isKindValidating(kind)}
                       onClick={() => onValidateAuths(kind)}
                     >
-                      <Icon name="check" size={15} />
-                      {validatingAuthKind === kind ? '校验中' : '校验 Auth'}
+                      <Icon name={isKindValidating(kind) ? 'pulse' : 'check'} size={15} />
+                      {isKindValidating(kind) ? '校验中' : '校验 Auth'}
                     </button>
                   )}
                   <span className="provider-group-count">{enabledCount}/{groupProviders.length} 已启用</span>
@@ -180,6 +188,21 @@ export function ProvidersView({
                     authStats={providerAuthStats(provider, providerKindIndices.get(provider.id) ?? -1, authValidation, authValidationByProvider)}
                     authTargets={providerAuthTargets(provider, providerKindIndices.get(provider.id) ?? -1)}
                     onValidateAuth={onValidateAuths}
+                    authValidating={
+                      (provider.kind === 'codex' || provider.kind === 'grok') &&
+                      isProviderValidating(
+                        provider.kind,
+                        providerKindIndices.get(provider.id) ?? -1,
+                      )
+                    }
+                    authProgress={
+                      provider.kind === 'codex' || provider.kind === 'grok'
+                        ? providerValidationProgress(
+                            provider.kind,
+                            providerKindIndices.get(provider.id) ?? -1,
+                          )
+                        : null
+                    }
                   />
                 ))}
               </div>
@@ -220,9 +243,9 @@ export function ProvidersView({
               ))}
             </div>
             <div className="auth-validation-actions">
-              <button className="button button-secondary compact-model-sync-button" type="button" onClick={onValidateVisibleAuths} disabled={validatingAuthKind === authValidation.kind || !authValidationResults.length}>
-                <Icon name="check" size={15} />
-                校验当前筛选
+              <button className="button button-secondary compact-model-sync-button" type="button" onClick={onValidateVisibleAuths} disabled={isKindValidating(authValidation.kind) || !authValidationResults.length}>
+                <Icon name={isKindValidating(authValidation.kind) ? 'pulse' : 'check'} size={15} />
+                {isKindValidating(authValidation.kind) ? '校验中' : '校验当前筛选'}
               </button>
               <button className="button button-secondary compact-model-sync-button" type="button" onClick={onEnableVisibleAuths} disabled={!authValidationResults.length}>
                 启用当前筛选
@@ -241,7 +264,14 @@ export function ProvidersView({
                 key={`${result.providerIndex}:${result.authIndex}`}
                 kind={authValidation.kind}
                 result={result}
-                disabled={validatingAuthKind === authValidation.kind}
+                disabled={isTargetValidating(authValidation.kind, {
+                  providerIndex: result.providerIndex,
+                  authIndex: result.authIndex,
+                })}
+                validating={isTargetValidating(authValidation.kind, {
+                  providerIndex: result.providerIndex,
+                  authIndex: result.authIndex,
+                })}
                 onValidate={onValidateAuthResult}
                 onDisable={onDisableAuthResult}
                 onDelete={onDeleteAuthResult}

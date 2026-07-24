@@ -32,6 +32,7 @@ use serde_json::Value;
 
 use crate::config::DebugDumpConfig;
 use crate::provider::types::ProviderType;
+use crate::util::dump_hub::{DumpEvent, DumpHub};
 
 #[derive(Debug, Clone)]
 pub struct DumpContext {
@@ -81,13 +82,24 @@ impl DumpContext {
 #[derive(Debug)]
 pub struct DebugDumpSession {
     dir: PathBuf,
+    id: String,
+    model: String,
+    endpoint: String,
+    provider: String,
+    is_streaming: bool,
+    status: Option<u16>,
+    hub: Option<DumpHub>,
     response_file: Mutex<Option<File>>,
     response_path: Mutex<Option<PathBuf>>,
 }
 
 impl DebugDumpSession {
     /// Create a dump session when enabled. Returns `None` when disabled or on I/O failure.
-    pub fn begin(config: &DebugDumpConfig, ctx: &DumpContext) -> Option<Self> {
+    pub fn begin(
+        config: &DebugDumpConfig,
+        ctx: &DumpContext,
+        hub: Option<DumpHub>,
+    ) -> Option<Self> {
         if !config.enabled {
             return None;
         }
@@ -104,8 +116,20 @@ impl DebugDumpSession {
             }
         };
 
+        let id = dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| dir.display().to_string());
+
         let session = Self {
             dir: dir.clone(),
+            id,
+            model: ctx.model.clone(),
+            endpoint: ctx.endpoint.clone(),
+            provider: ctx.provider.clone(),
+            is_streaming: ctx.is_streaming,
+            status: ctx.status,
+            hub,
             response_file: Mutex::new(None),
             response_path: Mutex::new(None),
         };
@@ -117,6 +141,8 @@ impl DebugDumpSession {
                 "failed to write debug dump meta"
             );
         }
+
+        session.publish_created();
 
         tracing::info!(
             dir = %dir.display(),
@@ -141,7 +167,9 @@ impl DebugDumpSession {
                 error = %error,
                 "failed to write debug dump request"
             );
+            return;
         }
+        self.publish_updated();
     }
 
     pub fn write_response_json(&self, body: &Value) {
@@ -152,7 +180,9 @@ impl DebugDumpSession {
                 error = %error,
                 "failed to write debug dump response json"
             );
+            return;
         }
+        self.publish_updated();
     }
 
     pub fn write_response_bytes(&self, body: &[u8]) {
@@ -168,7 +198,9 @@ impl DebugDumpSession {
                 error = %error,
                 "failed to write debug dump response bytes"
             );
+            return;
         }
+        self.publish_updated();
     }
 
     pub fn write_error(&self, error: &str) {
@@ -179,7 +211,9 @@ impl DebugDumpSession {
                 error = %io_error,
                 "failed to write debug dump error"
             );
+            return;
         }
+        self.publish_updated();
     }
 
     pub fn append_response_chunk(&self, chunk: &[u8]) {
@@ -220,15 +254,67 @@ impl DebugDumpSession {
                 }
             }
         }
-        if let Some(file) = guard.as_mut()
-            && let Err(error) = file.write_all(chunk)
-        {
-            tracing::warn!(
-                path = %path.display(),
-                error = %error,
-                "failed to append debug dump response chunk"
-            );
+        if let Some(file) = guard.as_mut() {
+            if let Err(error) = file.write_all(chunk) {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "failed to append debug dump response chunk"
+                );
+                return;
+            }
         }
+
+        if let Some(hub) = self.hub.as_ref()
+            && hub.receiver_count() > 0
+        {
+            let text = String::from_utf8_lossy(chunk).into_owned();
+            if !text.is_empty() {
+                hub.publish(DumpEvent::Chunk {
+                    id: self.id.clone(),
+                    file: "response.sse".to_string(),
+                    text,
+                });
+            }
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn list_files(&self) -> Vec<String> {
+        list_dump_files(&self.dir)
+    }
+
+    fn publish_created(&self) {
+        let Some(hub) = self.hub.as_ref() else {
+            return;
+        };
+        hub.publish(DumpEvent::Created {
+            id: self.id.clone(),
+            model: self.model.clone(),
+            endpoint: self.endpoint.clone(),
+            provider: self.provider.clone(),
+            is_streaming: self.is_streaming,
+            status: self.status,
+            files: self.list_files(),
+        });
+    }
+
+    fn publish_updated(&self) {
+        let Some(hub) = self.hub.as_ref() else {
+            return;
+        };
+        hub.publish(DumpEvent::Updated {
+            id: self.id.clone(),
+            model: self.model.clone(),
+            endpoint: self.endpoint.clone(),
+            provider: self.provider.clone(),
+            is_streaming: self.is_streaming,
+            status: self.status,
+            files: self.list_files(),
+        });
     }
 
     fn write_meta(&self, ctx: &DumpContext) -> std::io::Result<()> {
@@ -276,6 +362,33 @@ fn write_json_file(path: &Path, value: &Value) -> std::io::Result<()> {
     let raw = serde_json::to_vec_pretty(value)
         .map_err(|error| std::io::Error::other(error.to_string()))?;
     fs::write(path, raw)
+}
+
+const DUMP_FILE_NAMES: &[&str] = &[
+    "meta.json",
+    "request.json",
+    "response.json",
+    "response.sse",
+    "response.bin",
+    "error.json",
+];
+
+pub fn is_allowed_dump_file(name: &str) -> bool {
+    DUMP_FILE_NAMES.contains(&name)
+}
+
+pub fn list_dump_files(dir: &Path) -> Vec<String> {
+    DUMP_FILE_NAMES
+        .iter()
+        .filter_map(|name| {
+            let path = dir.join(name);
+            path.is_file().then(|| (*name).to_string())
+        })
+        .collect()
+}
+
+pub fn dump_base_dir(config: &DebugDumpConfig) -> PathBuf {
+    PathBuf::from(&config.dir)
 }
 
 /// Keep directory components filesystem-safe and reasonably short.
@@ -400,10 +513,14 @@ mod tests {
             enabled: true,
             dir: dir.display().to_string(),
         };
-        let ctx =
-            DumpContext::new("gpt-4o", ProviderType::Chat, Some(ProviderType::Claude), false)
-                .with_status(200);
-        let session = DebugDumpSession::begin(&config, &ctx).expect("session");
+        let ctx = DumpContext::new(
+            "gpt-4o",
+            ProviderType::Chat,
+            Some(ProviderType::Claude),
+            false,
+        )
+        .with_status(200);
+        let session = DebugDumpSession::begin(&config, &ctx, None).expect("session");
         session.write_request(&serde_json::json!({"model":"gpt-4o","messages":[]}));
         session.write_response_json(&serde_json::json!({"id":"resp"}));
 
@@ -446,7 +563,7 @@ mod tests {
         let ctx = DumpContext::new("m", ProviderType::Chat, Some(ProviderType::Chat), false);
 
         let sessions: Vec<_> = (0..8)
-            .map(|_| DebugDumpSession::begin(&config, &ctx).expect("session"))
+            .map(|_| DebugDumpSession::begin(&config, &ctx, None).expect("session"))
             .collect();
         let mut names: Vec<_> = sessions
             .iter()
@@ -454,7 +571,11 @@ mod tests {
             .collect();
         names.sort();
         names.dedup();
-        assert_eq!(names.len(), 8, "dirs must be unique under concurrency: {names:?}");
+        assert_eq!(
+            names.len(),
+            8,
+            "dirs must be unique under concurrency: {names:?}"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -466,6 +587,6 @@ mod tests {
             dir: "logs".into(),
         };
         let ctx = DumpContext::new("m", ProviderType::Chat, None, false);
-        assert!(DebugDumpSession::begin(&config, &ctx).is_none());
+        assert!(DebugDumpSession::begin(&config, &ctx, None).is_none());
     }
 }

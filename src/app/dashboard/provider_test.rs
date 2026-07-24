@@ -13,7 +13,7 @@ use crate::{
     error::ProxyError,
     provider::{
         UpstreamResponse,
-        credentials::credential_slot_count,
+        credentials::provider_test_slot_count,
         types::{AttemptTarget, HeaderMap, ProviderType},
     },
     state::AppState,
@@ -191,7 +191,7 @@ fn provider_test_attempt_count(
         config_index: 0,
         config: config.clone(),
     };
-    credential_slot_count(&target)
+    provider_test_slot_count(&target)
 }
 
 pub(super) fn write_provider_test_stream_response(

@@ -3,7 +3,7 @@ import {
   defaultPriority,
   providerMeta,
 } from '../config/providers'
-import type { ApiProvider, Provider, ProviderDraft, ProviderKind, RetryConfig } from '../types/domain'
+import type { ApiProvider, DebugDumpConfig, Provider, ProviderDraft, ProviderKind, RetryConfig } from '../types/domain'
 import { isRecord } from './records'
 
 export function fromApiProvider(provider: ApiProvider): Provider {
@@ -77,10 +77,13 @@ export function buildConfigExport(
   retry: RetryConfig,
   apiKey: string,
   port: number,
+  logLevel?: string | null,
+  debugDump?: DebugDumpConfig | null,
 ) {
   return {
     port,
     api_key: apiKey,
+    ...(logLevel ? { log_level: logLevel } : {}),
     model_priority: priority,
     fallback_models: fallbacks,
     model_aliases: modelAliases,
@@ -96,6 +99,28 @@ export function buildConfigExport(
       max_retries: retry.maxRetries,
       backoff_step_ms: retry.backoffStepMs,
     },
+    debug_dump: {
+      enabled: Boolean(debugDump?.enabled),
+      dir: debugDump?.dir?.trim() || 'logs',
+    },
+  }
+}
+
+export function logLevelFromImport(value: unknown): string | null {
+  if (!isRecord(value) || typeof value.log_level !== 'string') return null
+  const level = value.log_level.trim()
+  return level || null
+}
+
+export function debugDumpFromImport(value: unknown): DebugDumpConfig | null {
+  if (!isRecord(value) || !isRecord(value.debug_dump)) return null
+  const dir =
+    typeof value.debug_dump.dir === 'string' && value.debug_dump.dir.trim()
+      ? value.debug_dump.dir.trim()
+      : 'logs'
+  return {
+    enabled: Boolean(value.debug_dump.enabled),
+    dir,
   }
 }
 

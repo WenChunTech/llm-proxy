@@ -1,9 +1,7 @@
 use std::collections::HashSet;
 
 use llm_proxy::provider::types::ProviderType;
-use llm_proxy::provider::{
-    Providers, has_rewrite, rewrite_request, wire_protocol,
-};
+use llm_proxy::provider::{Providers, has_rewrite, rewrite_request, wire_protocol};
 use serde_json::{Value, json};
 
 fn tool_type(tool: &Value) -> Option<&str> {
@@ -38,7 +36,12 @@ fn skip_convert_and_rewrite_when_same_wire_and_no_dialect() {
     });
 
     let out = providers
-        .prepare_request(ProviderType::Gemini, body.clone(), ProviderType::Gemini, true)
+        .prepare_request(
+            ProviderType::Gemini,
+            body.clone(),
+            ProviderType::Gemini,
+            true,
+        )
         .expect("prepare");
 
     // No convert, no rewrite, Gemini does not force stream.
@@ -112,7 +115,10 @@ fn grok_rewrite_only_when_source_already_responses() {
         .iter()
         .filter_map(|t| t.get("type").and_then(Value::as_str))
         .collect();
-    assert_eq!(types, vec!["function", "function", "web_search", "x_search"]);
+    assert_eq!(
+        types,
+        vec!["function", "function", "web_search", "x_search"]
+    );
     for tool in tools {
         if tool.get("type").and_then(Value::as_str) == Some("function") {
             // function tools are not rewritten for external_web_access
@@ -246,7 +252,10 @@ fn grok_dialect_rewrite_expands_and_filters_tools() {
     let out = rewrite_request(ProviderType::Grok, body).unwrap();
     let tools = out.get("tools").and_then(Value::as_array).unwrap();
     let types: Vec<_> = tools.iter().filter_map(tool_type).collect();
-    assert_eq!(types, vec!["function", "function", "web_search", "x_search"]);
+    assert_eq!(
+        types,
+        vec!["function", "function", "web_search", "x_search"]
+    );
     let names: Vec<_> = tools.iter().filter_map(tool_name).collect();
     assert!(names.contains(&"read_file"));
     assert!(names.contains(&"run_shell"));
@@ -532,7 +541,6 @@ fn grok_maps_openai_search_content_types_image_to_enable_image_search() {
     assert_eq!(tools[3], json!({"type": "x_search"}));
 }
 
-
 #[test]
 fn grok_profile_injects_x_search_when_tools_present() {
     let body = json!({
@@ -630,10 +638,7 @@ fn grok_profile_adapts_x_search_to_xai_responses_shape() {
     assert!(x0.get("enableVideoUnderstanding").is_none());
     assert!(x0.get("unknown_field").is_none());
     // max 20 handles; prefer allowed over excluded
-    assert_eq!(
-        x0["allowed_x_handles"].as_array().unwrap().len(),
-        20
-    );
+    assert_eq!(x0["allowed_x_handles"].as_array().unwrap().len(), 20);
     assert!(x0.get("excluded_x_handles").is_none());
     assert_eq!(x0["from_date"], "2025-10-01");
     assert_eq!(x0["to_date"], "2025-10-10");

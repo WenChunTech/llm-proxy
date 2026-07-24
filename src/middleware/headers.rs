@@ -81,7 +81,6 @@ fn header_blocked(name: &str, blocklist: &[&str]) -> bool {
         .any(|blocked| name.eq_ignore_ascii_case(blocked))
 }
 
-
 pub fn apply_map_headers(
     headers: &mut crate::provider::types::HeaderMap,
     extra: &std::collections::HashMap<String, String>,

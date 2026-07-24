@@ -61,4 +61,3 @@ fn unsupported_bun_priority_entries_are_ignored() {
     let registry = ProviderRegistry::new(Arc::new(config));
     assert_eq!(registry.providers_for_model("m"), vec![ProviderType::Chat]);
 }
-

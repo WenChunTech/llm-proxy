@@ -4,6 +4,7 @@ use crate::{
     config::{CodexAuth, Config, ConfigPersist, GrokAuth, persist_config, validate_config},
     error::ProxyError,
     provider::{Providers, registry::ProviderRegistry, types::ProviderType},
+    util::{DumpHub, LogHub, log_filter},
 };
 
 #[derive(Clone)]
@@ -13,6 +14,8 @@ pub struct AppState {
     auth_cache: Arc<tokio::sync::RwLock<RuntimeAuthCache>>,
     pub providers: Providers,
     pub http: reqwest::Client,
+    pub log_hub: LogHub,
+    pub dump_hub: DumpHub,
 }
 
 #[derive(Clone)]
@@ -62,7 +65,11 @@ struct RuntimeAuthCache {
 }
 
 impl AppState {
-    pub fn from_loaded(loaded: crate::config::LoadedConfig) -> Result<Self, ProxyError> {
+    pub fn from_loaded(
+        loaded: crate::config::LoadedConfig,
+        log_hub: LogHub,
+        dump_hub: DumpHub,
+    ) -> Result<Self, ProxyError> {
         let config = Arc::new(loaded.config);
         let registry = ProviderRegistry::new(config.clone());
         let http = reqwest::Client::builder().build()?;
@@ -85,6 +92,8 @@ impl AppState {
             auth_cache: Arc::new(tokio::sync::RwLock::new(RuntimeAuthCache::default())),
             providers: Providers::new(),
             http,
+            log_hub,
+            dump_hub,
         })
     }
 
@@ -102,12 +111,23 @@ impl AppState {
 
     pub async fn update_config(&self, config: Config) -> Result<(), ProxyError> {
         validate_config(&config)?;
+        let previous_log_level = self.snapshot().await.config.log_level.clone();
         let mut inner = self.inner.write().await;
         persist_config(&inner.persist, &config).await?;
         let config = Arc::new(config);
         inner.registry = ProviderRegistry::new(config.clone());
         inner.config = config;
         self.auth_cache.write().await.clear();
+        if inner.config.log_level != previous_log_level {
+            if let Err(error) = log_filter::apply_log_level(inner.config.log_level.as_deref()) {
+                tracing::warn!(error = %error, "failed to hot-reload log filter");
+            } else {
+                tracing::info!(
+                    log_level = inner.config.log_level.as_deref().unwrap_or("info"),
+                    "log filter reloaded"
+                );
+            }
+        }
         tracing::info!(
             config_source = %inner.persist.label(),
             port = inner.config.port,

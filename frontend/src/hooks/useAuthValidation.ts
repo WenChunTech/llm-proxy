@@ -1,25 +1,30 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { providerMeta } from '../config/providers'
-import { apiAuthHeaders } from '../lib/api'
 import {
   applyAuthValidationResults,
-  buildAuthValidationConfig,
   deleteProviderAuthTarget,
   mergeAuthValidationState,
   setProviderAuthDisabled,
   syncAuthValidationPayloadWithProviders,
   visibleAuthValidationResults,
 } from '../lib/authValidation'
+import {
+  createAuthValidationJobId,
+  isKindValidating,
+  isProviderValidating,
+  isTargetValidating,
+  providerValidationProgress,
+  type AuthValidationJob,
+} from '../lib/authValidationProgress'
+import { streamAuthValidation } from '../lib/authValidationStream'
 import type {
   AuthProviderKind,
   AuthStatus,
   AuthValidationFilter,
-  AuthValidationResponse,
   AuthValidationState,
   AuthValidationTarget,
   Provider,
-  ProviderKind,
 } from '../types/domain'
 
 export function useAuthValidation(options: {
@@ -38,67 +43,182 @@ export function useAuthValidation(options: {
     persistConfig,
     setToast,
   } = options
-  const [validatingAuthKind, setValidatingAuthKind] = useState<ProviderKind | null>(null)
-  const [authValidation, setAuthValidation] = useState<AuthValidationState | null>(null)
 
-  async function validateAuths(
-    kind: AuthProviderKind,
-    validateOptions: { targets?: AuthValidationTarget[]; replace?: boolean } = {},
-  ) {
-    const kindProviders = providers.filter((provider) => provider.kind === kind)
-    if (!kindProviders.length) {
-      setToast(`没有可校验的 ${providerMeta[kind].label} 提供商`)
-      return
-    }
-    if (validateOptions.targets && !validateOptions.targets.length) {
-      setToast('当前筛选项没有可校验的 auth')
-      return
-    }
-    setValidatingAuthKind(kind)
-    if (validateOptions.replace !== false) setAuthValidation(null)
-    try {
-      const response = await fetch(`/api/${kind}/validate`, {
-        method: 'POST',
-        headers: apiAuthHeaders(accessKey, { 'content-type': 'application/json' }),
-        body: JSON.stringify({
-          config: buildAuthValidationConfig(providers),
-          ...(validateOptions.targets ? { targets: validateOptions.targets } : {}),
-        }),
-      })
-      if (response.status === 401) {
-        setAuthStatus('login')
-        throw new Error('unauthorized')
+  const [authValidation, setAuthValidation] = useState<AuthValidationState | null>(null)
+  const [validationJobs, setValidationJobs] = useState<AuthValidationJob[]>([])
+  const providersRef = useRef(providers)
+  providersRef.current = providers
+  const authValidationRef = useRef(authValidation)
+  authValidationRef.current = authValidation
+  const jobsRef = useRef(validationJobs)
+  jobsRef.current = validationJobs
+  const abortByJobRef = useRef(new Map<string, () => void>())
+
+  const upsertJob = useCallback((jobId: string, patch: Partial<AuthValidationJob>) => {
+    setValidationJobs((current) =>
+      current.map((job) => (job.id === jobId ? { ...job, ...patch } : job)),
+    )
+  }, [])
+
+  const removeJobLater = useCallback((jobId: string) => {
+    window.setTimeout(() => {
+      setValidationJobs((current) => current.filter((job) => job.id !== jobId))
+      abortByJobRef.current.delete(jobId)
+    }, 1200)
+  }, [])
+
+  const validateAuths = useCallback(
+    (
+      kind: AuthProviderKind,
+      validateOptions: { targets?: AuthValidationTarget[]; replace?: boolean } = {},
+    ) => {
+      const kindProviders = providersRef.current.filter((provider) => provider.kind === kind)
+      if (!kindProviders.length) {
+        setToast(`没有可校验的 ${providerMeta[kind].label} 提供商`)
+        return
       }
-      if (!response.ok) throw new Error(await response.text())
-      const payload = (await response.json()) as AuthValidationResponse
-      if (!payload.success) throw new Error('validation failed')
-      const nextProviders = applyAuthValidationResults(providers, kind, payload.data.results)
-      const nextValidation = mergeAuthValidationState(
-        validateOptions.replace === false ? authValidation : null,
+      const targets = validateOptions.targets
+      if (targets && !targets.length) {
+        setToast('当前筛选项没有可校验的 auth')
+        return
+      }
+
+      const currentJobs = jobsRef.current
+      const blocked = targets?.length
+        ? targets.some((target) => isTargetValidating(currentJobs, kind, target))
+        : isKindValidating(currentJobs, kind)
+      if (blocked) {
+        setToast(`${providerMeta[kind].label} 正在校验中，请稍候`)
+        return
+      }
+
+      const jobId = createAuthValidationJobId()
+      const job: AuthValidationJob = {
+        id: jobId,
         kind,
-        payload.data,
-      )
-      setProviders(nextProviders)
-      setAuthValidation(nextValidation)
-      void persistConfig({ providers: nextProviders })
-      setToast(
-        `${providerMeta[kind].label} 校验完成：有效 ${nextValidation.payload.valid}，无效 ${nextValidation.payload.invalid}`,
-      )
-    } catch (error) {
-      if (!(error instanceof Error && error.message === 'unauthorized')) {
-        setToast(`${providerMeta[kind].label} auth 校验失败`)
+        targets: targets ? [...targets] : [],
+        status: 'running',
+        total: 0,
+        completed: 0,
+        currentLabel: '连接中…',
       }
-    } finally {
-      setValidatingAuthKind(null)
-    }
-  }
+      setValidationJobs((current) => [...current, job])
+
+      if (validateOptions.replace !== false && !targets?.length) {
+        setAuthValidation(null)
+      }
+
+      const abort = streamAuthValidation({
+        kind,
+        accessKey,
+        providers: providersRef.current,
+        targets,
+        handlers: {
+          onStarted: (event) => {
+            upsertJob(jobId, {
+              total: event.total,
+              completed: 0,
+              currentLabel: event.total > 0 ? `0/${event.total}` : '准备中…',
+            })
+          },
+          onResult: (event) => {
+            upsertJob(jobId, {
+              total: event.total,
+              completed: event.completed,
+              currentLabel: event.result.label || `${event.completed}/${event.total}`,
+            })
+            setProviders((currentProviders) => {
+              const nextProviders = applyAuthValidationResults(
+                currentProviders,
+                kind,
+                [event.result],
+              )
+              providersRef.current = nextProviders
+              return nextProviders
+            })
+            setAuthValidation((current) =>
+              mergeAuthValidationState(current, kind, {
+                model: '',
+                total: 1,
+                checked: event.result.skipped ? 0 : 1,
+                valid: event.result.valid && event.result.reason !== 'rate_limited' ? 1 : 0,
+                invalid: !event.result.valid && !event.result.skipped ? 1 : 0,
+                skipped: event.result.skipped ? 1 : 0,
+                rateLimited: event.result.reason === 'rate_limited' ? 1 : 0,
+                refreshed: event.result.refreshed ? 1 : 0,
+                results: [event.result],
+              }),
+            )
+          },
+          onDone: (event) => {
+            // Prefer the latest React state snapshot, then fall back to the ref.
+            // Always re-apply the full result set so multi-auth arrays cannot shrink.
+            const baseProviders = providersRef.current
+            const nextProviders = applyAuthValidationResults(
+              baseProviders,
+              kind,
+              event.data.results,
+            )
+            providersRef.current = nextProviders
+            setProviders(nextProviders)
+            const nextValidation = mergeAuthValidationState(
+              // For targeted revalidation keep previous panel state base.
+              targets?.length ? authValidationRef.current : authValidationRef.current,
+              kind,
+              event.data,
+            )
+            setAuthValidation(nextValidation)
+            void persistConfig({ providers: nextProviders })
+            upsertJob(jobId, {
+              status: 'done',
+              total: event.data.total,
+              completed: event.data.total,
+              currentLabel: '完成',
+            })
+            setToast(
+              `${providerMeta[kind].label} 校验完成：有效 ${nextValidation.payload.valid}，无效 ${nextValidation.payload.invalid}`,
+            )
+            removeJobLater(jobId)
+          },
+          onError: (message) => {
+            if (message.toLowerCase().includes('unauthorized') || message.includes('401')) {
+              setAuthStatus('login')
+            } else {
+              setToast(
+                message && message !== 'WebSocket 连接失败' && message !== '校验连接已断开'
+                  ? `${providerMeta[kind].label} auth 校验失败：${message}`
+                  : `${providerMeta[kind].label} auth 校验失败`,
+              )
+            }
+            upsertJob(jobId, {
+              status: 'error',
+              error: message,
+              currentLabel: '失败',
+            })
+            removeJobLater(jobId)
+          },
+        },
+      })
+
+      abortByJobRef.current.set(jobId, abort)
+    },
+    [
+      accessKey,
+      persistConfig,
+      removeJobLater,
+      setAuthStatus,
+      setProviders,
+      setToast,
+      upsertJob,
+    ],
+  )
 
   function setAuthValidationFilter(filter: AuthValidationFilter) {
     setAuthValidation((current) => (current ? { ...current, filter } : current))
   }
 
   function validateAuthTargets(kind: AuthProviderKind, targets?: AuthValidationTarget[]) {
-    void validateAuths(kind, targets ? { targets, replace: false } : {})
+    validateAuths(kind, targets ? { targets, replace: false } : { replace: true })
   }
 
   function updateAuthValidationProviders(
@@ -146,80 +266,90 @@ export function useAuthValidation(options: {
       providerIndex: result.providerIndex,
       authIndex: result.authIndex,
     }))
-    void validateAuths(authValidation.kind, { targets, replace: false })
-  }
-
-  function disableVisibleAuthResults() {
-    if (!authValidation) return
-    const targets = visibleAuthValidationResults(authValidation)
-    if (!targets.length) {
-      setToast('当前筛选项没有可禁用的 auth')
-      return
-    }
-    updateAuthValidationProviders(
-      authValidation.kind,
-      (currentProviders) =>
-        targets.reduce(
-          (nextProviders, result) =>
-            setProviderAuthDisabled(nextProviders, authValidation.kind, result, true),
-          currentProviders,
-        ),
-      `已禁用 ${targets.length} 个 auth，配置保存中`,
-    )
+    validateAuths(authValidation.kind, { targets, replace: false })
   }
 
   function enableVisibleAuthResults() {
     if (!authValidation) return
+    const kind = authValidation.kind
     const targets = visibleAuthValidationResults(authValidation)
-    if (!targets.length) {
-      setToast('当前筛选项没有可启用的 auth')
-      return
-    }
     updateAuthValidationProviders(
-      authValidation.kind,
+      kind,
       (currentProviders) =>
         targets.reduce(
-          (nextProviders, result) =>
-            setProviderAuthDisabled(nextProviders, authValidation.kind, result, false),
+          (next, result) =>
+            setProviderAuthDisabled(
+              next,
+              kind,
+              { providerIndex: result.providerIndex, authIndex: result.authIndex },
+              false,
+            ),
           currentProviders,
         ),
-      `已启用 ${targets.length} 个 auth，配置保存中`,
+      `已启用 ${targets.length} 个 auth`,
+    )
+  }
+
+  function disableVisibleAuthResults() {
+    if (!authValidation) return
+    const kind = authValidation.kind
+    const targets = visibleAuthValidationResults(authValidation)
+    updateAuthValidationProviders(
+      kind,
+      (currentProviders) =>
+        targets.reduce(
+          (next, result) =>
+            setProviderAuthDisabled(
+              next,
+              kind,
+              { providerIndex: result.providerIndex, authIndex: result.authIndex },
+              true,
+            ),
+          currentProviders,
+        ),
+      `已禁用 ${targets.length} 个 auth`,
     )
   }
 
   function deleteVisibleAuthResults() {
     if (!authValidation) return
+    const kind = authValidation.kind
     const targets = visibleAuthValidationResults(authValidation)
-    if (!targets.length) {
-      setToast('当前筛选项没有可删除的 auth')
-      return
-    }
-    const orderedTargets = [...targets].sort(
-      (a, b) => b.providerIndex - a.providerIndex || b.authIndex - a.authIndex,
-    )
     updateAuthValidationProviders(
-      authValidation.kind,
+      kind,
       (currentProviders) =>
-        orderedTargets.reduce(
-          (nextProviders, result) =>
-            deleteProviderAuthTarget(nextProviders, authValidation.kind, result),
-          currentProviders,
-        ),
-      `已删除 ${targets.length} 个 auth，配置保存中`,
+        [...targets]
+          .sort((a, b) => b.authIndex - a.authIndex || b.providerIndex - a.providerIndex)
+          .reduce(
+            (next, result) =>
+              deleteProviderAuthTarget(next, kind, {
+                providerIndex: result.providerIndex,
+                authIndex: result.authIndex,
+              }),
+            currentProviders,
+          ),
+      `已删除 ${targets.length} 个 auth`,
     )
   }
 
   return {
-    validatingAuthKind,
     authValidation,
+    validationJobs,
+    isKindValidating: (kind: AuthProviderKind) => isKindValidating(validationJobs, kind),
+    isProviderValidating: (kind: AuthProviderKind, providerIndex: number) =>
+      isProviderValidating(validationJobs, kind, providerIndex),
+    isTargetValidating: (kind: AuthProviderKind, target: AuthValidationTarget) =>
+      isTargetValidating(validationJobs, kind, target),
+    providerValidationProgress: (kind: AuthProviderKind, providerIndex: number) =>
+      providerValidationProgress(validationJobs, kind, providerIndex),
     validateAuths,
-    setAuthValidationFilter,
     validateAuthTargets,
+    setAuthValidationFilter,
+    validateVisibleAuthResults,
+    enableVisibleAuthResults,
+    disableVisibleAuthResults,
+    deleteVisibleAuthResults,
     disableAuthFromValidation,
     deleteAuthFromValidation,
-    validateVisibleAuthResults,
-    disableVisibleAuthResults,
-    enableVisibleAuthResults,
-    deleteVisibleAuthResults,
   }
 }

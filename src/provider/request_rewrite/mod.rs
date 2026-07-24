@@ -95,9 +95,7 @@ pub fn prepare_request(
         body = protocol::convert_request(body, source, profile.wire)?;
     }
 
-    if need_rewrite
-        && let Some(rewrite) = profile.rewrite
-    {
+    if need_rewrite && let Some(rewrite) = profile.rewrite {
         body = rewrite(body)?;
     }
 

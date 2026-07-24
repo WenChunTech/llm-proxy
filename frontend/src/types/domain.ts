@@ -1,4 +1,4 @@
-export type View = 'providers' | 'routing'
+export type View = 'providers' | 'routing' | 'logs'
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type AuthStatus = 'checking' | 'ready' | 'login'
 
@@ -43,6 +43,11 @@ export type ApiProvider = {
   auth?: unknown
 }
 
+export type DebugDumpConfig = {
+  enabled: boolean
+  dir: string
+}
+
 export type DashboardPayload = {
   port: number
   providers: ApiProvider[]
@@ -55,6 +60,8 @@ export type DashboardPayload = {
   }
   api_key: string
   api_key_enabled: boolean
+  log_level?: string | null
+  debug_dump?: DebugDumpConfig
 }
 
 export type ApiModel = {

@@ -19,6 +19,19 @@
   --soft-panel: #fbfcfd;
   --hover-bg: #f6f9fb;
   --mono: 'SFMono-Regular', ui-monospace, Consolas, monospace;
+  --teal-strong: #0d6d5e;
+  --teal-border: #b7e4db;
+  --status-ok: #1aa87a;
+  --status-ok-soft: rgba(26, 168, 122, 0.14);
+  --status-warn: #d6a64a;
+  --status-warn-soft: rgba(214, 166, 74, 0.16);
+  --status-error: #d16b5c;
+  --status-error-soft: rgba(209, 107, 92, 0.14);
+  --status-neutral: #9aa6af;
+  --status-neutral-soft: rgba(154, 166, 175, 0.12);
+  --console-bg: #0f1720;
+  --console-ink: #d7e2ea;
+  --console-muted: #8092a1;
 }
 
 :root[data-theme='dark'] {
@@ -37,6 +50,19 @@
   --field-ink: #dce6ee;
   --soft-panel: #121c27;
   --hover-bg: #1b2835;
+  --teal-strong: #37c6ac;
+  --teal-border: rgba(55, 198, 172, 0.35);
+  --status-ok: #37c6ac;
+  --status-ok-soft: rgba(55, 198, 172, 0.16);
+  --status-warn: #d6a64a;
+  --status-warn-soft: rgba(214, 166, 74, 0.18);
+  --status-error: #e17c61;
+  --status-error-soft: rgba(225, 124, 97, 0.16);
+  --status-neutral: #7f8f9c;
+  --status-neutral-soft: rgba(127, 143, 156, 0.14);
+  --console-bg: #0b121a;
+  --console-ink: #d7e2ea;
+  --console-muted: #8092a1;
 }
 
 * {

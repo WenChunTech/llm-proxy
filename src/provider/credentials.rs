@@ -20,6 +20,19 @@ pub fn credential_slot_count(target: &AttemptTarget) -> usize {
     }
 }
 
+/// Credential slots to exercise during dashboard model testing.
+///
+/// For Codex/Grok, a non-empty `api_key` is treated as an explicit credential choice:
+/// only the api_key is tested (auth entries are not polled). Without `api_key`, every
+/// enabled auth entry is still covered.
+pub fn provider_test_slot_count(target: &AttemptTarget) -> usize {
+    match &target.config {
+        ProviderConfig::Codex(config) if !config.base.api_key.trim().is_empty() => 1,
+        ProviderConfig::Grok(config) if !config.base.api_key.trim().is_empty() => 1,
+        _ => credential_slot_count(target),
+    }
+}
+
 /// Attempt budget for one model: full target/credential coverage, or `max_retries` if larger.
 pub fn coverage_attempt_budget(targets: &[AttemptTarget], max_retries: usize) -> usize {
     let coverage = credential_coverage_attempts(targets);

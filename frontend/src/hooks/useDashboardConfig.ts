@@ -9,9 +9,11 @@ import { apiAuthHeaders, fetchModelCatalog } from '../lib/api'
 import { downloadJson } from '../lib/browser'
 import {
   buildConfigExport,
+  debugDumpFromImport,
   dedupeProvidersForSave,
   filterModelAliases,
   fromApiProvider,
+  logLevelFromImport,
   modelAliasesFromImport,
   providersFromImport,
   toApiProvider,
@@ -26,6 +28,7 @@ import type {
   ApiModel,
   AuthStatus,
   DashboardPayload,
+  DebugDumpConfig,
   Provider,
   ProviderDraft,
   ProviderKind,
@@ -39,6 +42,8 @@ type PersistInput = {
   modelAliases?: Record<string, string>
   retry?: RetryConfig
   apiKey?: string
+  logLevel?: string | null
+  debugDump?: DebugDumpConfig
 }
 
 type ConfigSnapshot = {
@@ -49,6 +54,8 @@ type ConfigSnapshot = {
   retry: RetryConfig
   projectApiKey: string
   accessKey: string
+  logLevel: string
+  debugDump: DebugDumpConfig
 }
 
 export function useDashboardConfig(setToast: (message: string) => void) {
@@ -67,6 +74,11 @@ export function useDashboardConfig(setToast: (message: string) => void) {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('checking')
   const [projectApiKey, setProjectApiKey] = useState('')
   const [port, setPort] = useState(3000)
+  const [logLevel, setLogLevel] = useState('info')
+  const [debugDump, setDebugDump] = useState<DebugDumpConfig>({
+    enabled: false,
+    dir: 'logs',
+  })
   const [isSaving, setIsSaving] = useState(false)
   const [showApiKeyEditor, setShowApiKeyEditor] = useState(false)
 
@@ -78,6 +90,8 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     retry: { maxRetries: 5, backoffStepMs: 5000 },
     projectApiKey: '',
     accessKey: readStoredAccessKey(),
+    logLevel: 'info',
+    debugDump: { enabled: false, dir: 'logs' },
   })
   snapshotRef.current = {
     providers,
@@ -87,6 +101,8 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     retry,
     projectApiKey,
     accessKey,
+    logLevel,
+    debugDump,
   }
 
   const pendingPatchRef = useRef<PersistInput>({})
@@ -108,6 +124,18 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     setRetry({
       maxRetries: payload.retry.max_retries,
       backoffStepMs: payload.retry.backoff_step_ms,
+    })
+    setLogLevel(
+      typeof payload.log_level === 'string' && payload.log_level.trim()
+        ? payload.log_level.trim()
+        : 'info',
+    )
+    setDebugDump({
+      enabled: Boolean(payload.debug_dump?.enabled),
+      dir:
+        typeof payload.debug_dump?.dir === 'string' && payload.debug_dump.dir.trim()
+          ? payload.debug_dump.dir.trim()
+          : 'logs',
     })
   }, [])
 
@@ -176,6 +204,8 @@ export function useDashboardConfig(setToast: (message: string) => void) {
             )
             const nextRetry = patch.retry ?? latest.retry
             const nextApiKey = patch.apiKey ?? latest.projectApiKey
+            const nextLogLevel = patch.logLevel ?? latest.logLevel
+            const nextDebugDump = patch.debugDump ?? latest.debugDump
 
             if (patch.providers !== undefined && nextProviders.length !== sourceProviders.length) {
               setProviders(nextProviders)
@@ -200,6 +230,8 @@ export function useDashboardConfig(setToast: (message: string) => void) {
                     max_retries: nextRetry.maxRetries,
                     backoff_step_ms: nextRetry.backoffStepMs,
                   },
+                  log_level: nextLogLevel,
+                  debug_dump: nextDebugDump,
                 }),
               })
               if (response.status === 401) {
@@ -217,6 +249,8 @@ export function useDashboardConfig(setToast: (message: string) => void) {
                 modelAliases: nextModelAliases,
                 retry: nextRetry,
                 projectApiKey: nextApiKey,
+                logLevel: nextLogLevel,
+                debugDump: nextDebugDump,
               }
 
               // A newer patch arrived while this request was in flight — save again.
@@ -459,6 +493,8 @@ export function useDashboardConfig(setToast: (message: string) => void) {
         latest.retry,
         latest.projectApiKey,
         port,
+        latest.logLevel,
+        latest.debugDump,
       ),
     )
   }
@@ -472,21 +508,44 @@ export function useDashboardConfig(setToast: (message: string) => void) {
         modelAliasesFromImport(value),
         [...providers, ...imported].flatMap((provider) => provider.models),
       )
-      if (!imported.length && !Object.keys(importedAliases).length) {
+      const importedLogLevel = logLevelFromImport(value)
+      const importedDebugDump = debugDumpFromImport(value)
+      if (
+        !imported.length &&
+        !Object.keys(importedAliases).length &&
+        importedLogLevel === null &&
+        importedDebugDump === null
+      ) {
         setToast('没有发现可导入的配置')
         return
       }
-      const nextProviders = [...providers, ...imported]
-      const nextAliases = { ...modelAliases, ...importedAliases }
+      const nextProviders = imported.length ? [...providers, ...imported] : providers
+      const nextAliases = Object.keys(importedAliases).length
+        ? { ...modelAliases, ...importedAliases }
+        : modelAliases
+      const nextLogLevel = importedLogLevel ?? logLevel
+      const nextDebugDump = importedDebugDump ?? debugDump
       setProviders(nextProviders)
       setModelAliases(nextAliases)
+      setLogLevel(nextLogLevel)
+      setDebugDump(nextDebugDump)
       snapshotRef.current = {
         ...snapshotRef.current,
         providers: nextProviders,
         modelAliases: nextAliases,
+        logLevel: nextLogLevel,
+        debugDump: nextDebugDump,
       }
-      void persistConfig({ providers: nextProviders, modelAliases: nextAliases })
-      setToast(`已导入 ${imported.length} 个提供商，${Object.keys(importedAliases).length} 个别名`)
+      void persistConfig({
+        providers: nextProviders,
+        modelAliases: nextAliases,
+        logLevel: nextLogLevel,
+        debugDump: nextDebugDump,
+      })
+      setToast(
+        `已导入 ${imported.length} 个提供商，${Object.keys(importedAliases).length} 个别名` +
+          (importedLogLevel || importedDebugDump ? '，已同步日志配置' : ''),
+      )
     } catch {
       setToast('导入失败，请检查 JSON 格式')
     }
@@ -506,6 +565,8 @@ export function useDashboardConfig(setToast: (message: string) => void) {
     setAuthStatus,
     projectApiKey,
     port,
+    logLevel,
+    debugDump,
     isSaving,
     showApiKeyEditor,
     setShowApiKeyEditor,

@@ -18,6 +18,29 @@ use super::types::{
 const CODEX_VALIDATION_MODEL: &str = "gpt-5.4";
 const GROK_VALIDATION_MODEL: &str = "grok-4.5";
 
+/// Progressive validation events for WebSocket clients.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(super) enum AuthValidateStreamEvent {
+    Started {
+        kind: String,
+        model: String,
+        total: usize,
+    },
+    Result {
+        completed: usize,
+        total: usize,
+        result: AuthValidateResult,
+    },
+    Done {
+        success: bool,
+        data: AuthValidatePayload,
+    },
+    Error {
+        message: String,
+    },
+}
+
 #[derive(Debug, Clone)]
 struct AuthValidationProbe {
     valid: bool,
@@ -42,6 +65,16 @@ pub(super) async fn validate_auths(
     request: AuthValidateRequest,
     provider_type: ProviderType,
 ) -> Result<AuthValidateResponse, ProxyError> {
+    validate_auths_with_progress(state, request, provider_type, None).await
+}
+
+pub(super) async fn validate_auths_with_progress(
+    state: &AppState,
+    request: AuthValidateRequest,
+    provider_type: ProviderType,
+    progress_tx: Option<tokio::sync::mpsc::Sender<AuthValidateStreamEvent>>,
+) -> Result<AuthValidateResponse, ProxyError> {
+    let kind = provider_type.as_str().to_string();
     let model = request
         .model
         .as_deref()
@@ -75,7 +108,39 @@ pub(super) async fn validate_auths(
         })
         .unwrap_or_default();
 
-    let mut results = Vec::new();
+    // Pre-count units of work so clients can render progress immediately.
+    let mut planned = 0usize;
+    for provider_index in &provider_indices {
+        let Some(provider) = providers.get(*provider_index) else {
+            continue;
+        };
+        let auth_items = auth_validation_items(provider.auth.as_ref());
+        if auth_items.is_empty() {
+            planned += 1;
+            continue;
+        }
+        for (auth_index, _) in auth_items.into_iter().enumerate() {
+            if target_filter
+                .as_ref()
+                .is_some_and(|targets| !targets.contains(&(*provider_index, auth_index)))
+            {
+                continue;
+            }
+            planned += 1;
+        }
+    }
+
+    emit_progress(
+        &progress_tx,
+        AuthValidateStreamEvent::Started {
+            kind: kind.clone(),
+            model: model.clone(),
+            total: planned,
+        },
+    )
+    .await;
+
+    let mut results = Vec::with_capacity(planned);
     for provider_index in &provider_indices {
         let Some(provider) = providers.get(*provider_index) else {
             continue;
@@ -83,7 +148,7 @@ pub(super) async fn validate_auths(
         let auth_items = auth_validation_items(provider.auth.as_ref());
         let auth_count = auth_items.len();
         if auth_items.is_empty() {
-            results.push(AuthValidateResult {
+            let result = AuthValidateResult {
                 provider_index: *provider_index,
                 auth_index: 0,
                 auth_count: 0,
@@ -97,7 +162,17 @@ pub(super) async fn validate_auths(
                 error_message: "auth JSON is empty".to_string(),
                 refreshed: false,
                 auth: Value::Null,
-            });
+            };
+            results.push(result.clone());
+            emit_progress(
+                &progress_tx,
+                AuthValidateStreamEvent::Result {
+                    completed: results.len(),
+                    total: planned,
+                    result,
+                },
+            )
+            .await;
             continue;
         }
 
@@ -123,7 +198,7 @@ pub(super) async fn validate_auths(
             if probe.reason == "rate_limited" {
                 set_auth_bool(&mut auth, "disabled", true);
             }
-            results.push(AuthValidateResult {
+            let result = AuthValidateResult {
                 provider_index: *provider_index,
                 auth_index,
                 auth_count,
@@ -137,7 +212,17 @@ pub(super) async fn validate_auths(
                 error_message: probe.error_message,
                 refreshed,
                 auth,
-            });
+            };
+            results.push(result.clone());
+            emit_progress(
+                &progress_tx,
+                AuthValidateStreamEvent::Result {
+                    completed: results.len(),
+                    total: planned,
+                    result,
+                },
+            )
+            .await;
         }
     }
 
@@ -154,22 +239,41 @@ pub(super) async fn validate_auths(
         .filter(|result| !result.valid && !result.skipped)
         .count();
 
+    let data = AuthValidatePayload {
+        model,
+        provider_indices,
+        targets: target_labels,
+        total: results.len(),
+        checked,
+        valid,
+        invalid,
+        skipped,
+        rate_limited,
+        refreshed,
+        results,
+    };
+    emit_progress(
+        &progress_tx,
+        AuthValidateStreamEvent::Done {
+            success: true,
+            data: data.clone(),
+        },
+    )
+    .await;
+
     Ok(AuthValidateResponse {
         success: true,
-        data: AuthValidatePayload {
-            model,
-            provider_indices,
-            targets: target_labels,
-            total: results.len(),
-            checked,
-            valid,
-            invalid,
-            skipped,
-            rate_limited,
-            refreshed,
-            results,
-        },
+        data,
     })
+}
+
+async fn emit_progress(
+    progress_tx: &Option<tokio::sync::mpsc::Sender<AuthValidateStreamEvent>>,
+    event: AuthValidateStreamEvent,
+) {
+    if let Some(tx) = progress_tx {
+        let _ = tx.send(event).await;
+    }
 }
 
 async fn auth_validation_providers(

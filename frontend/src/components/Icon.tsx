@@ -25,6 +25,7 @@ const iconPaths: Record<string, string> = {
   external: 'M14 5h5v5M19 5l-8 8',
   grip: 'M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01',
   sidebar: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM9 3v18',
+  terminal: 'M4 5h16v14H4zM8 9l3 3-3 3M12 15h4',
 }
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {
