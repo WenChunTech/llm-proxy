@@ -35,13 +35,19 @@ export function highlightSse(source: string) {
   return escapeHtml(source)
     .replace(/^(event:\s*)(.*)$/gm, '<span class="tok-key">$1</span><span class="tok-str">$2</span>')
     .replace(/^(data:\s*)(.*)$/gm, (_, prefix, rest) => {
+      // Keep file-saved formatting: never pretty-print streaming JSON payloads.
       const unescaped = rest
         .replaceAll('&lt;', '<')
         .replaceAll('&gt;', '>')
         .replaceAll('&amp;', '&')
-      const pretty = prettyMaybeJson(unescaped)
-      if (pretty !== unescaped && (unescaped.trim().startsWith('{') || unescaped.trim().startsWith('['))) {
-        return `<span class="tok-key">${prefix}</span>${highlightJson(pretty)}`
+      const trimmed = unescaped.trim()
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          JSON.parse(trimmed)
+          return `<span class="tok-key">${prefix}</span>${highlightJson(unescaped)}`
+        } catch {
+          // fall through to plain text
+        }
       }
       return `<span class="tok-key">${prefix}</span><span class="tok-str">${rest}</span>`
     })
@@ -49,10 +55,10 @@ export function highlightSse(source: string) {
 }
 
 export function renderHighlighted(content: string, language: string) {
+  if (language === 'sse') return highlightSse(content)
   if (language === 'json' || content.trim().startsWith('{') || content.trim().startsWith('[')) {
     return highlightJson(prettyMaybeJson(content))
   }
-  if (language === 'sse') return highlightSse(content)
   return escapeHtml(content)
 }
 

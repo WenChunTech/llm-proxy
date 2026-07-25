@@ -16,16 +16,21 @@ export function DumpViewer({
   accessKey,
   items,
   selectedId,
+  selectedIds,
   detail,
   fileTab,
   listFilter,
   contentFilter,
   loadingList,
   loadingDetail,
+  deleting,
   listError,
   liveChunks,
   copyHint,
   onSelect,
+  onToggleSelect,
+  onToggleSelectAll,
+  onDeleteOne,
   onContentFilterChange,
   onFileTabChange,
   onReloadDetail,
@@ -34,33 +39,30 @@ export function DumpViewer({
   accessKey: string
   items: DumpSummary[]
   selectedId: string | null
+  selectedIds: string[]
   detail: DumpDetail | null
   fileTab: string
   listFilter: string
   contentFilter: string
   loadingList: boolean
   loadingDetail: boolean
+  deleting: boolean
   listError: string
   liveChunks: Record<string, string>
   copyHint: string
   onSelect: (id: string) => void
+  onToggleSelect: (id: string) => void
+  onToggleSelectAll: () => void
+  onDeleteOne: (id: string) => void
   onContentFilterChange: (value: string) => void
   onFileTabChange: (value: string) => void
   onReloadDetail: (id: string) => void
   onCopyHint: (value: string) => void
 }) {
   const dumpCodeRef = useRef<HTMLPreElement | null>(null)
-
-  const filteredItems = useMemo(() => {
-    const query = listFilter.trim().toLowerCase()
-    if (!query) return items
-    return items.filter((item) =>
-      [item.id, item.model, item.endpoint, item.provider, String(item.status ?? '')]
-        .join(' ')
-        .toLowerCase()
-        .includes(query),
-    )
-  }, [listFilter, items])
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const allSelected = items.length > 0 && items.every((item) => selectedSet.has(item.id))
+  const someSelected = items.some((item) => selectedSet.has(item.id))
 
   const activeFile = useMemo(() => {
     if (!detail) return null
@@ -128,35 +130,88 @@ export function DumpViewer({
     <div className="dump-layout">
       <aside className="dump-list panel">
         <div className="dump-list-heading">
-          <strong>会话列表</strong>
-          <span>{filteredItems.length}</span>
+          <div className="dump-list-heading-left">
+            <label className="dump-select-all" title={allSelected ? '取消全选' : '全选当前列表'}>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={(node) => {
+                  if (node) node.indeterminate = !allSelected && someSelected
+                }}
+                onChange={onToggleSelectAll}
+                disabled={!items.length || deleting}
+              />
+              <strong>会话列表</strong>
+            </label>
+          </div>
+          <span>
+            {selectedIds.length > 0 ? `${selectedIds.length}/` : ''}
+            {items.length}
+          </span>
         </div>
         {loadingList && <div className="dump-empty">加载中…</div>}
         {!loadingList && listError && <div className="dump-empty is-error">{listError}</div>}
-        {!loadingList && !listError && !filteredItems.length && (
-          <div className="dump-empty">暂无请求转储。发起一次代理请求后会出现在这里。</div>
+        {!loadingList && !listError && !items.length && (
+          <div className="dump-empty">
+            {listFilter.trim()
+              ? '没有匹配的请求转储。可尝试其他关键字（模型 / 请求体 / 响应体）。'
+              : '暂无请求转储。发起一次代理请求后会出现在这里。'}
+          </div>
         )}
         <div className="dump-list-scroll">
-          {filteredItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`dump-list-item ${selectedId === item.id ? 'active' : ''}`}
-              onClick={() => onSelect(item.id)}
-            >
-              <div className="dump-list-item-top">
-                <strong title={item.model}>{item.model || 'unknown model'}</strong>
-                <span className={`dump-status ${statusClass(item.status)}`}>
-                  {item.status ?? '…'}
-                </span>
+          {items.map((item) => {
+            const checked = selectedSet.has(item.id)
+            return (
+              <div
+                key={item.id}
+                className={`dump-list-item ${selectedId === item.id ? 'active' : ''} ${checked ? 'is-checked' : ''}`}
+              >
+                <label className="dump-list-check" onClick={(event) => event.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={deleting}
+                    onChange={() => onToggleSelect(item.id)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="dump-list-item-main"
+                  onClick={() => onSelect(item.id)}
+                >
+                  <div className="dump-list-item-top">
+                    <strong title={item.model}>{item.model || 'unknown model'}</strong>
+                    <span className={`dump-status ${statusClass(item.status)}`}>
+                      {item.status ?? '…'}
+                    </span>
+                  </div>
+                  <div className="dump-list-item-meta">
+                    <span>{item.provider || item.endpoint || '—'}</span>
+                    <span>{item.is_streaming ? 'stream' : 'json'}</span>
+                  </div>
+                  <div className="dump-list-item-id">{formatDumpTime(item.id, item.mtime_ms)}</div>
+                  {item.matches && item.matches.length > 0 && (
+                    <div className="dump-list-item-matches" title={item.matches.join(', ')}>
+                      匹配：{item.matches.slice(0, 4).join(' · ')}
+                      {item.matches.length > 4 ? ' …' : ''}
+                    </div>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="icon-button subtle danger-button dump-list-delete"
+                  title="删除该会话"
+                  disabled={deleting}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onDeleteOne(item.id)
+                  }}
+                >
+                  <Icon name="trash" size={14} />
+                </button>
               </div>
-              <div className="dump-list-item-meta">
-                <span>{item.provider || item.endpoint || '—'}</span>
-                <span>{item.is_streaming ? 'stream' : 'json'}</span>
-              </div>
-              <div className="dump-list-item-id">{formatDumpTime(item.id, item.mtime_ms)}</div>
-            </button>
-          ))}
+            )
+          })}
         </div>
       </aside>
 
@@ -190,6 +245,15 @@ export function DumpViewer({
                   onClick={() => onReloadDetail(detail.id)}
                 >
                   重新加载
+                </button>
+                <button
+                  className="button button-secondary danger-action"
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => onDeleteOne(detail.id)}
+                >
+                  <Icon name="trash" size={15} />
+                  删除会话
                 </button>
                 <button
                   className="button button-secondary"
@@ -251,24 +315,6 @@ export function DumpViewer({
                   </div>
                   <div className="logs-actions">
                     <button
-                      className="button button-secondary"
-                      type="button"
-                      title="置顶"
-                      onClick={() => scrollNode(dumpCodeRef.current, 'top')}
-                    >
-                      <Icon name="toTop" size={14} />
-                      置顶
-                    </button>
-                    <button
-                      className="button button-secondary"
-                      type="button"
-                      title="置底"
-                      onClick={() => scrollNode(dumpCodeRef.current, 'bottom')}
-                    >
-                      <Icon name="toBottom" size={14} />
-                      置底
-                    </button>
-                    <button
                       className="text-button"
                       type="button"
                       onClick={() => downloadServerFile(activeFile.name)}
@@ -277,13 +323,39 @@ export function DumpViewer({
                     </button>
                   </div>
                 </div>
-                <pre
-                  ref={dumpCodeRef}
-                  className={`dump-code language-${activeFile.language}`}
-                  dangerouslySetInnerHTML={{
-                    __html: activeHtml || (contentFilter.trim() ? '无匹配内容' : ' '),
-                  }}
-                />
+                <div className="logs-scroll-shell dump-code-shell">
+                  <pre
+                    ref={dumpCodeRef}
+                    className={`dump-code language-${activeFile.language}`}
+                    dangerouslySetInnerHTML={{
+                      __html: activeHtml || (contentFilter.trim() ? '无匹配内容' : ' '),
+                    }}
+                  />
+                  <div className="logs-scroll-actions" aria-label="滚动控制">
+                    <button
+                      className="button button-secondary logs-scroll-button"
+                      type="button"
+                      title="置顶"
+                      onClick={() => {
+                        requestAnimationFrame(() => scrollNode(dumpCodeRef.current, 'top'))
+                      }}
+                    >
+                      <Icon name="toTop" size={14} />
+                      置顶
+                    </button>
+                    <button
+                      className="button button-secondary logs-scroll-button"
+                      type="button"
+                      title="置底"
+                      onClick={() => {
+                        requestAnimationFrame(() => scrollNode(dumpCodeRef.current, 'bottom'))
+                      }}
+                    >
+                      <Icon name="toBottom" size={14} />
+                      置底
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="dump-empty">该会话暂无文件</div>

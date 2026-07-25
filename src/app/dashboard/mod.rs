@@ -10,7 +10,8 @@ mod validation_ws;
 
 pub use endpoints::{build_provider_models_endpoint, build_provider_responses_endpoint};
 pub(super) use logs::{
-    api_debug_dump_detail, api_debug_dump_file, api_debug_dumps, api_logs_snapshot, api_logs_ws,
+    api_debug_dump_delete, api_debug_dump_detail, api_debug_dump_file, api_debug_dumps,
+    api_debug_dumps_delete, api_logs_snapshot, api_logs_ws,
 };
 pub use types::DashboardAuthProvider;
 pub use validation::validation_auth_base_url;

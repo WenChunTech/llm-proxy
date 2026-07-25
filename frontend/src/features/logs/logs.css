@@ -3,7 +3,8 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: calc(100vh - 180px);
+  height: calc(100vh - 148px);
+  min-height: 560px;
 }
 
 .logs-toolbar {
@@ -72,15 +73,25 @@
 .logs-panel {
   flex: 1;
   display: flex;
-  min-height: 520px;
+  min-height: 0;
   padding: 0;
+  overflow: hidden;
+}
+
+.logs-scroll-shell {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
 .logs-console {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   margin: 0;
-  padding: 16px 18px;
+  padding: 16px 18px 64px;
   overflow: auto;
   color: var(--console-ink);
   background: var(--console-bg);
@@ -89,6 +100,29 @@
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.logs-scroll-actions {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.logs-scroll-button {
+  pointer-events: auto;
+  min-height: 32px;
+  padding: 0 10px;
+  box-shadow: 0 8px 20px rgba(15, 23, 32, 0.18);
+  backdrop-filter: blur(8px);
+}
+
+:root[data-theme='dark'] .logs-scroll-button {
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
 }
 
 .logs-line + .logs-line {
@@ -109,7 +143,8 @@
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 14px;
-  min-height: 620px;
+  flex: 1;
+  min-height: 0;
   align-items: stretch;
 }
 
@@ -117,7 +152,8 @@
 .dump-detail {
   display: flex;
   flex-direction: column;
-  min-height: 620px;
+  min-height: 0;
+  height: 100%;
   padding: 0;
   overflow: hidden;
 }
@@ -326,13 +362,19 @@ mark.log-hit {
   background: rgba(255, 196, 72, 0.28);
 }
 
+.dump-code-shell {
+  background: #0f1720;
+}
+
 .dump-code {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   margin: 0;
-  padding: 16px 18px;
+  padding: 16px 18px 64px;
   overflow: auto;
   color: #d7e2ea;
-  background: #0f1720;
+  background: transparent;
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.55;
@@ -375,13 +417,23 @@ mark.log-hit {
 }
 
 @media (max-width: 980px) {
+  .logs-page {
+    height: auto;
+    min-height: calc(100vh - 148px);
+  }
+
   .dump-layout {
     grid-template-columns: 1fr;
+    min-height: 70vh;
   }
 
   .dump-list {
-    min-height: 280px;
-    max-height: 320px;
+    min-height: 240px;
+    max-height: 300px;
+  }
+
+  .dump-detail {
+    min-height: 420px;
   }
 }
 
@@ -487,3 +539,87 @@ mark.log-hit {
   margin: 4px 0 0;
 }
 
+
+
+.logs-filter-wide {
+  width: min(360px, 100%);
+}
+
+.dump-list-heading-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dump-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.dump-select-all input {
+  margin: 0;
+}
+
+.dump-list-item {
+  position: relative;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 10px 10px 8px;
+}
+
+.dump-list-item.is-checked {
+  border-color: rgba(209, 107, 92, 0.28);
+  background: rgba(209, 107, 92, 0.06);
+}
+
+.dump-list-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 22px;
+  padding-top: 2px;
+  cursor: pointer;
+}
+
+.dump-list-check input {
+  margin: 0;
+}
+
+.dump-list-item-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.dump-list-delete {
+  flex: 0 0 auto;
+  opacity: 0.55;
+}
+
+.dump-list-item:hover .dump-list-delete,
+.dump-list-item.active .dump-list-delete {
+  opacity: 1;
+}
+
+.dump-list-item-matches {
+  color: var(--teal-strong);
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -38,6 +38,9 @@ pub enum DumpEvent {
         status: Option<u16>,
         files: Vec<String>,
     },
+    Deleted {
+        id: String,
+    },
     Chunk {
         id: String,
         file: String,

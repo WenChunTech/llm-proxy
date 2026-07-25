@@ -9,6 +9,10 @@ type DumpLifecycleEvent = {
   summary: DumpSummary
 }
 
+type DumpDeletedEvent = {
+  id: string
+}
+
 type DumpChunkEvent = {
   id: string
   text: string
@@ -19,6 +23,7 @@ type UseLogsSocketOptions = {
   dumpEnabled: boolean
   onDumpsDir?: (dir: string) => void
   onDumpEvent?: (event: DumpLifecycleEvent) => void
+  onDumpDeleted?: (event: DumpDeletedEvent) => void
   onChunk?: (event: DumpChunkEvent) => void
 }
 
@@ -27,15 +32,18 @@ export function useLogsSocket({
   dumpEnabled,
   onDumpsDir,
   onDumpEvent,
+  onDumpDeleted,
   onChunk,
 }: UseLogsSocketOptions) {
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [processLines, setProcessLines] = useState<string[]>([])
   const onDumpsDirRef = useRef(onDumpsDir)
   const onDumpEventRef = useRef(onDumpEvent)
+  const onDumpDeletedRef = useRef(onDumpDeleted)
   const onChunkRef = useRef(onChunk)
   onDumpsDirRef.current = onDumpsDir
   onDumpEventRef.current = onDumpEvent
+  onDumpDeletedRef.current = onDumpDeleted
   onChunkRef.current = onChunk
 
   useEffect(() => {
@@ -104,6 +112,12 @@ export function useLogsSocket({
           }
           if (!summary.id) return
           onDumpEventRef.current?.({ type, summary })
+          return
+        }
+        if (type === 'deleted') {
+          const id = String(payload.id ?? '')
+          if (!id) return
+          onDumpDeletedRef.current?.({ id })
           return
         }
         if (type === 'chunk') {

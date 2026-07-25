@@ -11,6 +11,7 @@ export type DumpSummary = {
   status: number | null
   files: string[]
   mtime_ms: number
+  matches?: string[]
 }
 
 export type DumpFile = {
@@ -34,7 +35,13 @@ export type DumpDetail = {
 export type DumpListPayload = {
   enabled: boolean
   dir: string
+  query?: string
   items: DumpSummary[]
+}
+
+export type DumpDeletePayload = {
+  deleted: string[]
+  failed: Array<{ id?: string; error?: string }>
 }
 
 export type DumpSocketEvent =
@@ -55,6 +62,10 @@ export type DumpSocketEvent =
       is_streaming: boolean
       status: number | null
       files: string[]
+    }
+  | {
+      type: 'deleted'
+      id: string
     }
   | {
       type: 'chunk'

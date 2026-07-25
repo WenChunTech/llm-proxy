@@ -56,7 +56,11 @@ export function filterLinesByKeyword(content: string, keyword: string) {
 
 export function scrollNode(node: HTMLElement | null, position: 'top' | 'bottom') {
   if (!node) return
-  node.scrollTop = position === 'top' ? 0 : node.scrollHeight
+  const top = position === 'top' ? 0 : node.scrollHeight
+  node.scrollTop = top
+  if (typeof node.scrollTo === 'function') {
+    node.scrollTo({ top, left: 0, behavior: 'auto' })
+  }
 }
 
 export function connectionLabel(connection: 'connecting' | 'open' | 'closed' | 'error') {

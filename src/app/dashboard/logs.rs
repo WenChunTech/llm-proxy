@@ -9,7 +9,7 @@ use futures_util::StreamExt;
 use salvo::http::{HeaderValue, header};
 use salvo::prelude::*;
 use salvo::websocket::{Message, WebSocketUpgrade};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -18,13 +18,15 @@ use crate::{
     util::{
         DumpHub, LogHub,
         debug_dump::{dump_base_dir, is_allowed_dump_file, list_dump_files},
+        dump_hub::DumpEvent,
     },
 };
 
-use super::{render_error, state_from_depot};
+use super::{JSON_MAX_SIZE, render_error, state_from_depot};
 
 const MAX_LIST: usize = 500;
 const MAX_FILE_BYTES: u64 = 12 * 1024 * 1024;
+const MAX_SEARCH_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 struct DumpSummary {
@@ -36,21 +38,38 @@ struct DumpSummary {
     status: Option<u16>,
     files: Vec<String>,
     mtime_ms: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    matches: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeleteDumpsRequest {
+    #[serde(default)]
+    ids: Vec<String>,
 }
 
 /// List recent debug dump sessions (newest first).
+///
+/// Optional query `q` searches model / provider / endpoint / id / status and
+/// dump file contents (request/response bodies).
 #[handler]
-pub(in crate::app) async fn api_debug_dumps(depot: &mut Depot, res: &mut Response) {
+pub(in crate::app) async fn api_debug_dumps(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let Some(state) = state_from_depot(depot).ok() else {
         render_error(res, ProxyError::Config("missing app state".to_string()));
         return;
     };
+    let query = req
+        .query::<String>("q")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let snapshot = state.snapshot().await;
     let base = dump_base_dir(&snapshot.config.debug_dump);
-    match list_dumps(&base) {
+    match list_dumps(&base, query.as_str()) {
         Ok(items) => res.render(Json(json!({
             "enabled": snapshot.config.debug_dump.enabled,
             "dir": snapshot.config.debug_dump.dir,
+            "query": query,
             "items": items,
         }))),
         Err(error) => render_error(res, error),
@@ -129,12 +148,91 @@ pub(in crate::app) async fn api_debug_dump_file(
     }
 }
 
+/// Delete one dump session directory.
+#[handler]
+pub(in crate::app) async fn api_debug_dump_delete(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) {
+    let Some(state) = state_from_depot(depot).ok() else {
+        render_error(res, ProxyError::Config("missing app state".to_string()));
+        return;
+    };
+    let Some(id) = req.param::<String>("id") else {
+        render_error(
+            res,
+            ProxyError::InvalidRequest("missing dump id".to_string()),
+        );
+        return;
+    };
+    let snapshot = state.snapshot().await;
+    let base = dump_base_dir(&snapshot.config.debug_dump);
+    match delete_dump(&base, &id) {
+        Ok(()) => {
+            state
+                .dump_hub
+                .publish(DumpEvent::Deleted { id: id.clone() });
+            res.render(Json(json!({
+                "deleted": [id],
+                "failed": [],
+            })));
+        }
+        Err(error) => render_error(res, error),
+    }
+}
+
+/// Batch-delete dump sessions by id.
+#[handler]
+pub(in crate::app) async fn api_debug_dumps_delete(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) {
+    let Some(state) = state_from_depot(depot).ok() else {
+        render_error(res, ProxyError::Config("missing app state".to_string()));
+        return;
+    };
+    let payload = match req
+        .parse_json_with_max_size::<DeleteDumpsRequest>(JSON_MAX_SIZE)
+        .await
+    {
+        Ok(payload) => payload,
+        Err(error) => {
+            render_error(
+                res,
+                ProxyError::InvalidRequest(format!("invalid JSON body: {error}")),
+            );
+            return;
+        }
+    };
+    if payload.ids.is_empty() {
+        render_error(
+            res,
+            ProxyError::InvalidRequest("ids must not be empty".to_string()),
+        );
+        return;
+    }
+    let snapshot = state.snapshot().await;
+    let base = dump_base_dir(&snapshot.config.debug_dump);
+    let result = delete_dumps(&base, &payload.ids);
+    for id in &result.deleted {
+        state
+            .dump_hub
+            .publish(DumpEvent::Deleted { id: id.clone() });
+    }
+    res.render(Json(json!({
+        "deleted": result.deleted,
+        "failed": result.failed,
+    })));
+}
+
 /// WebSocket: dump lifecycle events + process log lines.
 ///
 /// Messages are JSON objects:
 /// - `{ "type":"hello", ... }`
 /// - `{ "type":"log", "line":"..." }`
-/// - dump events from `DumpEvent` (`created` / `updated` / `chunk`)
+/// - dump events from `DumpEvent` (`created` / `updated` / `deleted` / `chunk`)
 #[handler]
 pub(in crate::app) async fn api_logs_ws(
     req: &mut Request,
@@ -239,7 +337,7 @@ async fn send_json(ws: &mut salvo::websocket::WebSocket, value: &impl Serialize)
     ws.send(Message::text(text)).await.map_err(|_| ())
 }
 
-fn list_dumps(base: &Path) -> Result<Vec<DumpSummary>, ProxyError> {
+fn list_dumps(base: &Path, query: &str) -> Result<Vec<DumpSummary>, ProxyError> {
     if !base.exists() {
         return Ok(Vec::new());
     }
@@ -250,6 +348,7 @@ fn list_dumps(base: &Path) -> Result<Vec<DumpSummary>, ProxyError> {
         ))
     })?;
 
+    let query = query.trim();
     let mut items = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
@@ -272,6 +371,14 @@ fn list_dumps(base: &Path) -> Result<Vec<DumpSummary>, ProxyError> {
             continue;
         }
         let meta = read_meta(&path).unwrap_or_default();
+        let matches = if query.is_empty() {
+            Vec::new()
+        } else {
+            match dump_query_matches(&path, &id, &meta, &files, query) {
+                Some(hits) => hits,
+                None => continue,
+            }
+        };
         let mtime_ms = entry
             .metadata()
             .ok()
@@ -288,6 +395,7 @@ fn list_dumps(base: &Path) -> Result<Vec<DumpSummary>, ProxyError> {
             status: meta.status,
             files,
             mtime_ms,
+            matches,
         });
     }
 
@@ -338,11 +446,120 @@ fn is_safe_id(id: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.')
 }
 
+fn dump_query_matches(
+    dir: &Path,
+    id: &str,
+    meta: &MetaFile,
+    files: &[String],
+    query: &str,
+) -> Option<Vec<String>> {
+    let needle = query.to_ascii_lowercase();
+    let mut matches = Vec::new();
+
+    if id.to_ascii_lowercase().contains(&needle) {
+        matches.push("id".to_string());
+    }
+    if meta.model.to_ascii_lowercase().contains(&needle) {
+        matches.push("model".to_string());
+    }
+    if meta.provider.to_ascii_lowercase().contains(&needle) {
+        matches.push("provider".to_string());
+    }
+    if meta.endpoint.to_ascii_lowercase().contains(&needle) {
+        matches.push("endpoint".to_string());
+    }
+    if meta
+        .status
+        .map(|status| status.to_string().contains(&needle))
+        .unwrap_or(false)
+    {
+        matches.push("status".to_string());
+    }
+
+    for name in files {
+        if file_contains_query(dir, name, &needle) {
+            matches.push(name.clone());
+        }
+    }
+
+    if matches.is_empty() {
+        None
+    } else {
+        Some(matches)
+    }
+}
+
+fn file_contains_query(dir: &Path, name: &str, needle_lower: &str) -> bool {
+    if !is_allowed_dump_file(name) {
+        return false;
+    }
+    let path = dir.join(name);
+    let Ok(meta) = fs::metadata(&path) else {
+        return false;
+    };
+    if !meta.is_file() || meta.len() == 0 {
+        return false;
+    }
+    let Ok(bytes) = fs::read(&path) else {
+        return false;
+    };
+    let limit = MAX_SEARCH_FILE_BYTES as usize;
+    let slice = if bytes.len() > limit {
+        &bytes[..limit]
+    } else {
+        &bytes[..]
+    };
+    // Prefer UTF-8 text search; fall back to lossy decode for mixed content.
+    if let Ok(text) = std::str::from_utf8(slice) {
+        return text.to_ascii_lowercase().contains(needle_lower);
+    }
+    String::from_utf8_lossy(slice)
+        .to_ascii_lowercase()
+        .contains(needle_lower)
+}
+
+#[derive(Debug, Default)]
+struct DeleteResult {
+    deleted: Vec<String>,
+    failed: Vec<Value>,
+}
+
+fn delete_dump(base: &Path, id: &str) -> Result<(), ProxyError> {
+    let dir = resolve_dump_dir(base, id)?;
+    fs::remove_dir_all(&dir).map_err(|error| {
+        ProxyError::Config(format!(
+            "failed to delete dump {}: {error}",
+            dir.display()
+        ))
+    })?;
+    Ok(())
+}
+
+fn delete_dumps(base: &Path, ids: &[String]) -> DeleteResult {
+    let mut result = DeleteResult::default();
+    let mut seen = std::collections::HashSet::new();
+    for raw in ids {
+        let id = raw.trim();
+        if id.is_empty() || !seen.insert(id.to_string()) {
+            continue;
+        }
+        match delete_dump(base, id) {
+            Ok(()) => result.deleted.push(id.to_string()),
+            Err(error) => result.failed.push(json!({
+                "id": id,
+                "error": error.to_string(),
+            })),
+        }
+    }
+    result
+}
+
 fn read_dump_detail(base: &Path, id: &str) -> Result<Value, ProxyError> {
     let dir = resolve_dump_dir(base, id)?;
     let meta = read_meta(&dir).unwrap_or_default();
     let files = list_dump_files(&dir);
-    let mut file_payloads = Vec::new();
+
+    let mut file_payloads = Vec::with_capacity(files.len());
     for name in &files {
         let path = dir.join(name);
         let meta_fs = fs::metadata(&path).map_err(|error| {
@@ -417,7 +634,12 @@ fn file_language(name: &str) -> &'static str {
 }
 
 /// Pretty-print JSON when possible; otherwise return readable UTF-8 text.
+/// Streaming dumps (`.sse`) keep on-disk formatting and are never reformatted.
 fn format_file_content(name: &str, bytes: &[u8]) -> String {
+    if name.ends_with(".sse") {
+        let text = String::from_utf8_lossy(bytes);
+        return sanitize_text(&text);
+    }
     if (name.ends_with(".json") || looks_like_json(bytes))
         && let Ok(value) = serde_json::from_slice::<Value>(bytes)
         && let Ok(pretty) = serde_json::to_string_pretty(&value)
@@ -511,4 +733,122 @@ pub(in crate::app) async fn api_logs_snapshot(depot: &mut Depot, res: &mut Respo
         "count": lines.len(),
         "sequence": state.log_hub.sequence(),
     })));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dump_root() -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "llm-proxy-dump-api-{}-{nanos}-{seq}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create root");
+        dir
+    }
+
+    fn write_dump(root: &Path, id: &str, model: &str, request_body: &str, response_body: &str) {
+        let dir = root.join(id);
+        fs::create_dir_all(&dir).expect("create dump");
+        fs::write(
+            dir.join("meta.json"),
+            format!(
+                r#"{{"model":"{model}","endpoint":"openai_chat","provider":"openai_chat","is_streaming":false,"status":200}}"#
+            ),
+        )
+        .expect("meta");
+        fs::write(dir.join("request.json"), request_body).expect("request");
+        fs::write(dir.join("response.json"), response_body).expect("response");
+    }
+
+    #[test]
+    fn list_dumps_filters_by_model_and_body_keyword() {
+        let root = temp_dump_root();
+        write_dump(
+            &root,
+            "20260101_000000_001",
+            "gpt-test",
+            r#"{"messages":[{"role":"user","content":"hello unique-alpha"}]}"#,
+            r#"{"choices":[{"message":{"content":"ok"}}]}"#,
+        );
+        write_dump(
+            &root,
+            "20260101_000000_002",
+            "claude-test",
+            r#"{"messages":[{"role":"user","content":"hello unique-beta"}]}"#,
+            r#"{"content":[{"text":"done unique-gamma"}]}"#,
+        );
+
+        let by_model = list_dumps(&root, "gpt-test").expect("list");
+        assert_eq!(by_model.len(), 1);
+        assert_eq!(by_model[0].id, "20260101_000000_001");
+        assert!(by_model[0].matches.contains(&"model".to_string()));
+
+        let by_request = list_dumps(&root, "unique-beta").expect("list");
+        assert_eq!(by_request.len(), 1);
+        assert_eq!(by_request[0].id, "20260101_000000_002");
+        assert!(by_request[0].matches.contains(&"request.json".to_string()));
+
+        let by_response = list_dumps(&root, "unique-gamma").expect("list");
+        assert_eq!(by_response.len(), 1);
+        assert!(
+            by_response[0]
+                .matches
+                .contains(&"response.json".to_string())
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn delete_dump_removes_directory_and_batch_skips_missing() {
+        let root = temp_dump_root();
+        write_dump(
+            &root,
+            "20260101_000000_010",
+            "model-a",
+            r#"{"ok":true}"#,
+            r#"{"ok":true}"#,
+        );
+        write_dump(
+            &root,
+            "20260101_000000_011",
+            "model-b",
+            r#"{"ok":true}"#,
+            r#"{"ok":true}"#,
+        );
+
+        delete_dump(&root, "20260101_000000_010").expect("delete one");
+        assert!(!root.join("20260101_000000_010").exists());
+
+        let result = delete_dumps(
+            &root,
+            &[
+                "20260101_000000_011".to_string(),
+                "missing-id".to_string(),
+                "20260101_000000_011".to_string(),
+            ],
+        );
+        assert_eq!(result.deleted, vec!["20260101_000000_011".to_string()]);
+        assert_eq!(result.failed.len(), 1);
+        assert!(!root.join("20260101_000000_011").exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rejects_unsafe_dump_ids() {
+        assert!(!is_safe_id("../etc"));
+        assert!(!is_safe_id("a/b"));
+        assert!(is_safe_id("20260101_000000_001"));
+    }
 }
