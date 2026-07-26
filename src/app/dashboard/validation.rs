@@ -4,7 +4,11 @@ use serde_json::{Value, json};
 
 use crate::{
     error::ProxyError,
-    provider::{oauth, types::ProviderType},
+    middleware::headers::{apply_map_headers, apply_optional_map_headers, merge_headers},
+    provider::{
+        oauth,
+        types::{HeaderMap, ProviderType},
+    },
     state::AppState,
     util::{auth_disabled, auth_string, set_auth_bool},
 };
@@ -299,6 +303,7 @@ async fn auth_validation_providers(
             .map(|provider| DashboardAuthProvider {
                 enabled: provider.base.enabled,
                 base_url: provider.base.base_url.clone(),
+                headers: provider.base.headers.clone(),
                 auth: serde_json::to_value(&provider.auth).ok(),
             })
             .collect(),
@@ -310,6 +315,7 @@ async fn auth_validation_providers(
             .map(|provider| DashboardAuthProvider {
                 enabled: provider.base.enabled,
                 base_url: provider.base.base_url.clone(),
+                headers: provider.base.headers.clone(),
                 auth: serde_json::to_value(&provider.auth).ok(),
             })
             .collect(),
@@ -443,35 +449,15 @@ async fn probe_validation_auth(
         "store": false,
         "stream": true,
     });
+    // Match formal Codex/Grok proxy header merge order:
+    // fixed protocol headers -> auth.headers -> provider.headers.
+    let headers = validation_request_headers(provider_type, token, auth, &provider.headers);
     let mut builder = client
         .post(&endpoint)
-        .bearer_auth(token)
-        .header("content-type", "application/json")
-        .header("accept", "text/event-stream")
-        .header("connection", "Keep-Alive")
         .timeout(Duration::from_secs(30))
         .json(&body);
-    if provider_type == ProviderType::Codex {
-        builder = builder
-            .header("user-agent", oauth::CODEX_USER_AGENT)
-            .header("originator", "codex-tui");
-        if let Some(account_id) = auth
-            .get("account_id")
-            .or_else(|| auth.get("chatgpt_account_id"))
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-        {
-            builder = builder.header("chatgpt-account-id", account_id);
-        }
-    }
-    if matches!(provider_type, ProviderType::Codex | ProviderType::Grok)
-        && let Some(headers) = auth.get("headers").and_then(Value::as_object)
-    {
-        for (name, value) in headers {
-            if let Some(value) = value.as_str().filter(|value| !value.trim().is_empty()) {
-                builder = builder.header(name, value);
-            }
-        }
+    for (name, value) in &headers {
+        builder = builder.header(name.as_str(), value.as_str());
     }
 
     match builder.send().await {
@@ -589,6 +575,58 @@ fn validation_error_message(error_type: Option<&(String, String, String)>, body:
         return message.clone();
     }
     body.chars().take(500).collect()
+}
+
+/// Build headers for Codex/Grok auth validation using the same merge rules as
+/// the formal provider request path.
+pub fn validation_request_headers(
+    provider_type: ProviderType,
+    token: &str,
+    auth: &Value,
+    provider_headers: &std::collections::HashMap<String, String>,
+) -> HeaderMap {
+    let forwarded = HeaderMap::new();
+    let mut fixed = vec![
+        ("content-type", "application/json".to_string()),
+        ("authorization", format!("Bearer {token}")),
+        ("accept", "text/event-stream".to_string()),
+    ];
+    if provider_type == ProviderType::Codex {
+        fixed.extend([
+            ("user-agent", oauth::CODEX_USER_AGENT.to_string()),
+            ("originator", "codex-tui".to_string()),
+            ("connection", "Keep-Alive".to_string()),
+        ]);
+    }
+
+    let mut headers = merge_headers(&forwarded, &fixed);
+    if provider_type == ProviderType::Codex
+        && let Some(account_id) = auth
+            .get("account_id")
+            .or_else(|| auth.get("chatgpt_account_id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    {
+        headers.insert("chatgpt-account-id".to_string(), account_id.to_string());
+    }
+
+    // Priority: custom provider headers override auth headers on conflicts.
+    apply_optional_map_headers(&mut headers, auth_headers_map(auth).as_ref());
+    apply_map_headers(&mut headers, provider_headers);
+    headers
+}
+
+fn auth_headers_map(auth: &Value) -> Option<std::collections::HashMap<String, String>> {
+    let headers = auth.get("headers")?.as_object()?;
+    let mut out = std::collections::HashMap::new();
+    for (name, value) in headers {
+        let Some(value) = value.as_str().map(str::trim).filter(|value| !value.is_empty()) else {
+            continue;
+        };
+        out.insert(name.clone(), value.to_string());
+    }
+    Some(out)
 }
 
 pub fn validation_auth_base_url<'a>(

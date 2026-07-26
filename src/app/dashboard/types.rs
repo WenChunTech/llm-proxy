@@ -106,6 +106,8 @@ pub struct DashboardAuthProvider {
     #[serde(default)]
     pub base_url: String,
     #[serde(default)]
+    pub headers: std::collections::HashMap<String, String>,
+    #[serde(default)]
     pub auth: Option<Value>,
 }
 

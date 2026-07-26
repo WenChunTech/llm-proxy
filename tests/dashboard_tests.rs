@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use llm_proxy::app::dashboard::{
     DashboardAuthProvider, build_provider_models_endpoint, build_provider_responses_endpoint,
-    validation_auth_base_url,
+    validation_auth_base_url, validation_request_headers,
 };
 use llm_proxy::provider::types::ProviderType;
 use serde_json::json;
@@ -53,6 +55,7 @@ fn grok_validation_prefers_auth_base_url() {
     let provider = DashboardAuthProvider {
         enabled: true,
         base_url: "https://api.x.ai/v1".to_string(),
+        headers: HashMap::new(),
         auth: None,
     };
     let auth = json!({
@@ -63,4 +66,73 @@ fn grok_validation_prefers_auth_base_url() {
         validation_auth_base_url(ProviderType::Grok, &provider, &auth, "https://api.x.ai/v1");
 
     assert_eq!(base_url, "https://cli-chat-proxy.grok.com/v1");
+}
+
+
+#[test]
+fn validation_headers_prefer_provider_over_auth_on_conflict() {
+    let auth = json!({
+        "account_id": "acct-1",
+        "headers": {
+            "X-Shared": "from-auth",
+            "X-Auth-Only": "auth-value",
+            "User-Agent": "auth-agent"
+        }
+    });
+    let provider_headers = HashMap::from([
+        ("X-Shared".to_string(), "from-provider".to_string()),
+        ("X-Provider-Only".to_string(), "provider-value".to_string()),
+    ]);
+
+    let headers = validation_request_headers(
+        ProviderType::Codex,
+        "token-123",
+        &auth,
+        &provider_headers,
+    );
+
+    assert_eq!(headers.get("authorization").map(String::as_str), Some("Bearer token-123"));
+    assert_eq!(headers.get("content-type").map(String::as_str), Some("application/json"));
+    assert_eq!(headers.get("accept").map(String::as_str), Some("text/event-stream"));
+    assert_eq!(headers.get("originator").map(String::as_str), Some("codex-tui"));
+    assert_eq!(
+        headers.get("chatgpt-account-id").map(String::as_str),
+        Some("acct-1")
+    );
+    assert_eq!(headers.get("x-shared").map(String::as_str), Some("from-provider"));
+    assert_eq!(headers.get("x-auth-only").map(String::as_str), Some("auth-value"));
+    assert_eq!(
+        headers.get("x-provider-only").map(String::as_str),
+        Some("provider-value")
+    );
+    // Auth headers override fixed protocol headers when provider headers are absent.
+    assert_eq!(headers.get("user-agent").map(String::as_str), Some("auth-agent"));
+}
+
+#[test]
+fn validation_headers_for_grok_omit_codex_only_fields() {
+    let auth = json!({
+        "headers": {
+            "X-Auth-Only": "auth-value"
+        }
+    });
+    let provider_headers = HashMap::from([("X-Provider-Only".to_string(), "provider-value".to_string())]);
+
+    let headers = validation_request_headers(
+        ProviderType::Grok,
+        "token-456",
+        &auth,
+        &provider_headers,
+    );
+
+    assert_eq!(headers.get("authorization").map(String::as_str), Some("Bearer token-456"));
+    assert_eq!(headers.get("x-auth-only").map(String::as_str), Some("auth-value"));
+    assert_eq!(
+        headers.get("x-provider-only").map(String::as_str),
+        Some("provider-value")
+    );
+    assert!(!headers.contains_key("user-agent"));
+    assert!(!headers.contains_key("originator"));
+    assert!(!headers.contains_key("connection"));
+    assert!(!headers.contains_key("chatgpt-account-id"));
 }

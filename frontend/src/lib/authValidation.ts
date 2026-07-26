@@ -25,6 +25,7 @@ function toAuthValidationProviderConfig(provider: Provider) {
   return {
     enabled: provider.enabled,
     base_url: provider.baseUrl,
+    headers: provider.headers,
     auth: provider.auth,
   }
 }
