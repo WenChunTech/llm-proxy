@@ -7,12 +7,14 @@ mod http;
 pub mod oauth;
 mod openai;
 mod request_rewrite;
+mod response_rewrite;
 
 pub mod executor;
 pub mod registry;
 pub mod types;
 
 pub use request_rewrite::{has_rewrite, rewrite_request, wire_protocol};
+pub use response_rewrite::{has_response_rewrite, prepare_response, response_wire_protocol, rewrite_response};
 
 use bytes::Bytes;
 use reqwest::header::{HeaderMap as ReqwestHeaderMap, HeaderName, HeaderValue};
@@ -21,7 +23,6 @@ use serde_json::Value;
 use crate::{
     config::ProviderConfig,
     error::ProxyError,
-    protocol,
     provider::types::{HeaderMap, ProviderType},
     stream::convert::{StreamContext, StreamConverterImpl},
 };
@@ -135,7 +136,8 @@ impl Providers {
         body: Value,
         target: ProviderType,
     ) -> Result<Value, ProxyError> {
-        protocol::convert_response(body, source.response_protocol(), target)
+        // Provider-scoped pipeline: optional rewrite → optional convert.
+        response_rewrite::prepare_response(source, body, target)
     }
 
     pub fn stream_converter(
