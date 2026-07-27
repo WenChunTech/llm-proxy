@@ -92,8 +92,15 @@ export function ProvidersView({
     const searchText = `${provider.name} ${providerMeta[provider.kind].label} ${provider.baseUrl} ${effectiveBaseUrlForProvider(provider)}`.toLowerCase()
     return matchesFilter && matchesKind && searchText.includes(query.toLowerCase())
   })
-  const authValidationResults = authValidation ? visibleAuthValidationResults(authValidation) : []
-  const authSummary = authValidation ? authValidationSummary(authValidation.payload.results) : null
+  const showAuthValidationPanel = Boolean(
+    authValidation && (kindFilter === 'all' || kindFilter === authValidation.kind),
+  )
+  const authValidationResults =
+    authValidation && showAuthValidationPanel ? visibleAuthValidationResults(authValidation) : []
+  const authSummary =
+    authValidation && showAuthValidationPanel
+      ? authValidationSummary(authValidation.payload.results)
+      : null
   const groupedProviders = defaultPriority
     .map((kind) => ({
       kind,
@@ -211,7 +218,7 @@ export function ProvidersView({
         })}
         {!visibleProviders.length && <div className="empty-state"><Icon name="search" size={24} /><strong>没有匹配的提供商</strong><span>尝试修改搜索词或筛选条件。</span></div>}
       </div>
-      {authValidation && (
+      {authValidation && showAuthValidationPanel && (
         <section className="auth-validation-panel">
           <div className="auth-validation-summary">
             <div>
