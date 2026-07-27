@@ -17,6 +17,7 @@ const iconPaths: Record<string, string> = {
   monitor: 'M4 5h16v10H4zM9 21h6M12 15v6',
   key: 'M15 7a4 4 0 1 0 2.8 6.8L21 17v3h-3v-2h-2v-2h-2l-1.8-1.8A4 4 0 0 0 15 7ZM7 11h.01',
   check: 'm5 12 4 4L19 6',
+  close: 'M6 6l12 12M18 6 6 18',
   arrowUp: 'm18 15-6-6-6 6',
   arrowDown: 'm6 9 6 6 6-6',
   toTop: 'M5 5h14M12 19V9M8 13l4-4 4 4',

@@ -839,6 +839,51 @@ code {
   flex: 0 0 auto;
 }
 
+.page-intro-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.auth-validation-concurrency-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  color: #65747f;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.auth-validation-concurrency-control input {
+  width: 74px;
+  height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: #425461;
+  font-family: var(--mono);
+  font-size: 13px;
+  text-align: left;
+}
+
+.auth-validation-concurrency-control input:focus {
+  border-color: #98d3c8;
+  box-shadow: 0 0 0 3px rgba(13, 146, 125, 0.08);
+  outline: none;
+}
+
+.auth-validation-concurrency-control.compact {
+  min-height: 32px;
+}
+
+.auth-validation-concurrency-control.compact input {
+  width: 64px;
+  height: 32px;
+}
+
 .auth-validation-panel {
   display: grid;
   gap: 10px;
@@ -850,10 +895,16 @@ code {
 }
 
 .auth-validation-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 14px;
+}
+
+.auth-validation-summary-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .auth-validation-summary strong {
@@ -861,6 +912,10 @@ code {
   margin-top: 4px;
   color: #435361;
   font-size: 14px;
+}
+
+.auth-validation-metrics {
+  grid-column: 1 / -1;
 }
 
 .auth-validation-metrics,
@@ -2797,7 +2852,20 @@ code {
 }
 
 :root[data-theme='dark'] .provider-test-section,
-:root[data-theme='dark'] .empty-state,
+:root[data-theme='dark'] .empty-state {
+  background: rgba(16, 24, 34, 0.72);
+  color: var(--muted);
+}
+
+:root[data-theme='dark'] .auth-validation-concurrency-control {
+  color: var(--muted);
+}
+
+:root[data-theme='dark'] .auth-validation-concurrency-control input {
+  background: rgba(8, 12, 18, 0.9);
+  color: var(--text);
+}
+
 :root[data-theme='dark'] .auth-validation-metrics span,
 :root[data-theme='dark'] .auth-validation-result,
 :root[data-theme='dark'] .auth-validation-result-row,

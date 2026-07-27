@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { providerMeta, providerMarkText, effectiveBaseUrlForProvider, defaultPriority } from '../../config/providers'
 import type { ListMoveAction } from '../../lib/list'
@@ -23,6 +23,67 @@ import {
   visibleAuthValidationResults,
 } from './authValidationView'
 
+const AUTH_VALIDATION_CONCURRENCY_MIN = 1
+
+function parseAuthValidationConcurrency(value: string) {
+  const next = Number.parseInt(value, 10)
+  return Number.isFinite(next) && next >= AUTH_VALIDATION_CONCURRENCY_MIN ? next : null
+}
+
+function AuthValidationConcurrencyControl({
+  value,
+  disabled,
+  compact = false,
+  onChange,
+}: {
+  value: number
+  disabled: boolean
+  compact?: boolean
+  onChange: (value: number) => void
+}) {
+  const [draft, setDraft] = useState(String(value))
+
+  useEffect(() => {
+    setDraft(String(value))
+  }, [value])
+
+  function commitDraft() {
+    const next = parseAuthValidationConcurrency(draft)
+    if (next !== null) {
+      onChange(next)
+      return
+    }
+    setDraft(String(value))
+  }
+
+  return (
+    <label
+      className={`auth-validation-concurrency-control${compact ? ' compact' : ''}`}
+      title="Codex / Grok auth 校验并发数"
+    >
+      <span>{compact ? '并发' : '校验并发'}</span>
+      <input
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        aria-label="Auth 校验并发数"
+        value={draft}
+        disabled={disabled}
+        onChange={(event) => {
+          const next = event.currentTarget.value
+          if (/^\d*$/.test(next)) setDraft(next)
+        }}
+        onBlur={commitDraft}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter') return
+          commitDraft()
+          event.currentTarget.blur()
+        }}
+      />
+    </label>
+  )
+}
+
 export function ProvidersView({
   providers,
   query,
@@ -44,7 +105,10 @@ export function ProvidersView({
   isTargetValidating,
   providerValidationProgress,
   authValidation,
+  validationConcurrency,
+  onValidationConcurrencyChange,
   onAuthValidationFilterChange,
+  onClearAuthValidation,
   onValidateVisibleAuths,
   onEnableVisibleAuths,
   onDisableVisibleAuths,
@@ -76,7 +140,10 @@ export function ProvidersView({
     providerIndex: number,
   ) => { completed: number; total: number; label: string } | null
   authValidation: AuthValidationState | null
+  validationConcurrency: number
+  onValidationConcurrencyChange: (value: number) => void
   onAuthValidationFilterChange: (filter: AuthValidationFilter) => void
+  onClearAuthValidation: () => void
   onValidateVisibleAuths: () => void
   onEnableVisibleAuths: () => void
   onDisableVisibleAuths: () => void
@@ -121,7 +188,14 @@ export function ProvidersView({
           <h2>提供商配置</h2>
           <p>维护上游 API 端点、模型清单与启用状态。保存后 Rust 运行态会立即刷新路由。</p>
         </div>
-        <button className="button button-primary" type="button" onClick={onAdd}><Icon name="plus" size={17} />添加提供商</button>
+        <div className="page-intro-actions">
+          <AuthValidationConcurrencyControl
+            value={validationConcurrency}
+            disabled={isKindValidating('codex') || isKindValidating('grok')}
+            onChange={onValidationConcurrencyChange}
+          />
+          <button className="button button-primary" type="button" onClick={onAdd}><Icon name="plus" size={17} />添加提供商</button>
+        </div>
       </section>
       <div className="toolbar">
         <label className="search-field">
@@ -224,6 +298,24 @@ export function ProvidersView({
             <div>
               <span className="eyebrow">AUTH VALIDATION</span>
               <strong>{providerMeta[authValidation.kind].label} 校验结果</strong>
+            </div>
+            <div className="auth-validation-summary-side">
+              <AuthValidationConcurrencyControl
+                value={validationConcurrency}
+                disabled={isKindValidating(authValidation.kind)}
+                compact
+                onChange={onValidationConcurrencyChange}
+              />
+              <button
+                className="icon-button"
+                type="button"
+                title="关闭校验结果"
+                aria-label="关闭校验结果"
+                onClick={onClearAuthValidation}
+                disabled={isKindValidating(authValidation.kind)}
+              >
+                <Icon name="close" size={15} />
+              </button>
             </div>
             <div className="auth-validation-metrics">
               <span className="summary total">总数 <b>{authSummary?.total ?? 0}</b></span>

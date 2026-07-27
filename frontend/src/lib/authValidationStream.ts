@@ -130,9 +130,10 @@ export function streamAuthValidation(options: {
   accessKey: string
   providers: Parameters<typeof buildAuthValidationConfig>[0]
   targets?: AuthValidationTarget[]
+  concurrency?: number
   handlers: AuthValidateStreamHandlers
 }): () => void {
-  const { kind, accessKey, providers, targets, handlers } = options
+  const { kind, accessKey, providers, targets, concurrency, handlers } = options
   let settled = false
   const ws = new WebSocket(buildDashboardWsUrl(`/api/${kind}/validate/ws`, accessKey))
 
@@ -146,6 +147,7 @@ export function streamAuthValidation(options: {
     const body = {
       config: buildAuthValidationConfig(providers),
       ...(targets?.length ? { targets } : {}),
+      ...(concurrency ? { concurrency } : {}),
     }
     ws.send(JSON.stringify(body))
   }

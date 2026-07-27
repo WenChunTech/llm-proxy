@@ -1,5 +1,13 @@
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
+use futures_util::stream::{self, StreamExt};
 use serde_json::{Value, json};
 
 use crate::{
@@ -21,6 +29,7 @@ use super::types::{
 
 const CODEX_VALIDATION_MODEL: &str = "gpt-5.4";
 const GROK_VALIDATION_MODEL: &str = "grok-4.5";
+const DEFAULT_AUTH_VALIDATION_CONCURRENCY: usize = 5;
 
 /// Progressive validation events for WebSocket clients.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -112,27 +121,57 @@ pub(super) async fn validate_auths_with_progress(
         })
         .unwrap_or_default();
 
-    // Pre-count units of work so clients can render progress immediately.
-    let mut planned = 0usize;
+    // Pre-count / build units of work so clients can render progress immediately
+    // and so validation can run with bounded concurrency.
+    let mut planned_tasks: Vec<AuthValidationTask> = Vec::new();
     for provider_index in &provider_indices {
         let Some(provider) = providers.get(*provider_index) else {
             continue;
         };
         let auth_items = auth_validation_items(provider.auth.as_ref());
+        let auth_count = auth_items.len();
+        let is_auth_array = provider.auth.as_ref().is_some_and(Value::is_array);
         if auth_items.is_empty() {
-            planned += 1;
+            planned_tasks.push(AuthValidationTask {
+                provider_index: *provider_index,
+                auth_index: 0,
+                auth_count: 0,
+                is_auth_array,
+                label: auth_validation_label(provider_type, *provider_index, 0, 0, None),
+                provider_enabled: provider.enabled,
+                auth: Value::Null,
+                empty_auth: true,
+            });
             continue;
         }
-        for (auth_index, _) in auth_items.into_iter().enumerate() {
+        for (auth_index, auth) in auth_items.into_iter().enumerate() {
             if target_filter
                 .as_ref()
                 .is_some_and(|targets| !targets.contains(&(*provider_index, auth_index)))
             {
                 continue;
             }
-            planned += 1;
+            planned_tasks.push(AuthValidationTask {
+                provider_index: *provider_index,
+                auth_index,
+                auth_count,
+                is_auth_array,
+                label: auth_validation_label(
+                    provider_type,
+                    *provider_index,
+                    auth_index,
+                    auth_count,
+                    Some(auth),
+                ),
+                provider_enabled: provider.enabled,
+                auth: auth.clone(),
+                empty_auth: false,
+            });
         }
     }
+
+    let planned = planned_tasks.len();
+    let concurrency = resolve_auth_validation_concurrency(request.concurrency);
 
     emit_progress(
         &progress_tx,
@@ -144,91 +183,105 @@ pub(super) async fn validate_auths_with_progress(
     )
     .await;
 
-    let mut results = Vec::with_capacity(planned);
-    for provider_index in &provider_indices {
-        let Some(provider) = providers.get(*provider_index) else {
-            continue;
-        };
-        let auth_items = auth_validation_items(provider.auth.as_ref());
-        let auth_count = auth_items.len();
-        if auth_items.is_empty() {
-            let result = AuthValidateResult {
-                provider_index: *provider_index,
-                auth_index: 0,
-                auth_count: 0,
-                is_auth_array: provider.auth.as_ref().is_some_and(Value::is_array),
-                label: auth_validation_label(provider_type, *provider_index, 0, 0, None),
-                disabled: !provider.enabled,
-                skipped: true,
-                valid: false,
-                reason: "no_auth".to_string(),
-                status_code: 0,
-                error_message: "auth JSON is empty".to_string(),
-                refreshed: false,
-                auth: Value::Null,
-            };
-            results.push(result.clone());
-            emit_progress(
-                &progress_tx,
-                AuthValidateStreamEvent::Result {
-                    completed: results.len(),
-                    total: planned,
-                    result,
-                },
-            )
-            .await;
-            continue;
-        }
+    let providers = Arc::new(providers);
+    let probe_model = Arc::new(model.clone());
+    let completed = Arc::new(AtomicUsize::new(0));
+    let http = state.http.clone();
 
-        for (auth_index, auth) in auth_items.into_iter().enumerate() {
-            if target_filter
-                .as_ref()
-                .is_some_and(|targets| !targets.contains(&(*provider_index, auth_index)))
-            {
-                continue;
+    let mut results: Vec<AuthValidateResult> = stream::iter(planned_tasks)
+        .map(|task| {
+            let providers = Arc::clone(&providers);
+            let probe_model = Arc::clone(&probe_model);
+            let progress_tx = progress_tx.clone();
+            let completed = Arc::clone(&completed);
+            let http = http.clone();
+            async move {
+                let result = if task.empty_auth {
+                    AuthValidateResult {
+                        provider_index: task.provider_index,
+                        auth_index: task.auth_index,
+                        auth_count: task.auth_count,
+                        is_auth_array: task.is_auth_array,
+                        label: task.label,
+                        disabled: !task.provider_enabled,
+                        skipped: true,
+                        valid: false,
+                        reason: "no_auth".to_string(),
+                        status_code: 0,
+                        error_message: "auth JSON is empty".to_string(),
+                        refreshed: false,
+                        auth: Value::Null,
+                    }
+                } else {
+                    let Some(provider) = providers.get(task.provider_index) else {
+                        return AuthValidateResult {
+                            provider_index: task.provider_index,
+                            auth_index: task.auth_index,
+                            auth_count: task.auth_count,
+                            is_auth_array: task.is_auth_array,
+                            label: task.label,
+                            disabled: !task.provider_enabled,
+                            skipped: true,
+                            valid: false,
+                            reason: "no_auth".to_string(),
+                            status_code: 0,
+                            error_message: "provider is missing".to_string(),
+                            refreshed: false,
+                            auth: Value::Null,
+                        };
+                    };
+                    let mut auth = task.auth;
+                    let disabled = auth_disabled(&auth) || !task.provider_enabled;
+                    let (probe, refreshed) = validate_single_auth(
+                        &http,
+                        provider_type,
+                        provider,
+                        &mut auth,
+                        probe_model.as_str(),
+                    )
+                    .await;
+                    if probe.reason == "rate_limited" {
+                        set_auth_bool(&mut auth, "disabled", true);
+                    }
+                    AuthValidateResult {
+                        provider_index: task.provider_index,
+                        auth_index: task.auth_index,
+                        auth_count: task.auth_count,
+                        is_auth_array: task.is_auth_array,
+                        label: task.label,
+                        disabled: auth_disabled(&auth) || disabled,
+                        skipped: false,
+                        valid: probe.valid,
+                        reason: probe.reason,
+                        status_code: probe.status_code,
+                        error_message: probe.error_message,
+                        refreshed,
+                        auth,
+                    }
+                };
+
+                let completed_count = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                emit_progress(
+                    &progress_tx,
+                    AuthValidateStreamEvent::Result {
+                        completed: completed_count,
+                        total: planned,
+                        result: result.clone(),
+                    },
+                )
+                .await;
+                result
             }
-            let mut auth = auth.clone();
-            let disabled = auth_disabled(&auth) || !provider.enabled;
-            let is_auth_array = provider.auth.as_ref().is_some_and(Value::is_array);
-            let label = auth_validation_label(
-                provider_type,
-                *provider_index,
-                auth_index,
-                auth_count,
-                Some(&auth),
-            );
-            let (probe, refreshed) =
-                validate_single_auth(&state.http, provider_type, provider, &mut auth, &model).await;
-            if probe.reason == "rate_limited" {
-                set_auth_bool(&mut auth, "disabled", true);
-            }
-            let result = AuthValidateResult {
-                provider_index: *provider_index,
-                auth_index,
-                auth_count,
-                is_auth_array,
-                label,
-                disabled: auth_disabled(&auth) || disabled,
-                skipped: false,
-                valid: probe.valid,
-                reason: probe.reason,
-                status_code: probe.status_code,
-                error_message: probe.error_message,
-                refreshed,
-                auth,
-            };
-            results.push(result.clone());
-            emit_progress(
-                &progress_tx,
-                AuthValidateStreamEvent::Result {
-                    completed: results.len(),
-                    total: planned,
-                    result,
-                },
-            )
-            .await;
-        }
-    }
+        })
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+
+    results.sort_by(|a, b| {
+        a.provider_index
+            .cmp(&b.provider_index)
+            .then(a.auth_index.cmp(&b.auth_index))
+    });
 
     let checked = results.iter().filter(|result| !result.skipped).count();
     let valid = results.iter().filter(|result| result.valid).count();
@@ -269,6 +322,24 @@ pub(super) async fn validate_auths_with_progress(
         success: true,
         data,
     })
+}
+
+#[derive(Debug, Clone)]
+struct AuthValidationTask {
+    provider_index: usize,
+    auth_index: usize,
+    auth_count: usize,
+    is_auth_array: bool,
+    label: String,
+    provider_enabled: bool,
+    auth: Value,
+    empty_auth: bool,
+}
+
+pub fn resolve_auth_validation_concurrency(requested: Option<usize>) -> usize {
+    requested
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_AUTH_VALIDATION_CONCURRENCY)
 }
 
 async fn emit_progress(
@@ -621,7 +692,11 @@ fn auth_headers_map(auth: &Value) -> Option<std::collections::HashMap<String, St
     let headers = auth.get("headers")?.as_object()?;
     let mut out = std::collections::HashMap::new();
     for (name, value) in headers {
-        let Some(value) = value.as_str().map(str::trim).filter(|value| !value.is_empty()) else {
+        let Some(value) = value
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
             continue;
         };
         out.insert(name.clone(), value.to_string());
@@ -630,7 +705,7 @@ fn auth_headers_map(auth: &Value) -> Option<std::collections::HashMap<String, St
 }
 
 pub fn validation_auth_base_url<'a>(
-    provider_type: ProviderType,
+    _provider_type: ProviderType,
     provider: &'a DashboardAuthProvider,
     auth: &'a Value,
     default_base_url: &'a str,
@@ -641,12 +716,6 @@ pub fn validation_auth_base_url<'a>(
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
-
-    if provider_type == ProviderType::Grok {
-        return auth_base_url
-            .or_else(|| (!provider_base_url.is_empty()).then_some(provider_base_url))
-            .unwrap_or(default_base_url);
-    }
 
     (!provider_base_url.is_empty())
         .then_some(provider_base_url)

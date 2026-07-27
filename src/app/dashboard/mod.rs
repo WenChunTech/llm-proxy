@@ -14,7 +14,7 @@ pub(super) use logs::{
     api_debug_dumps_delete, api_logs_snapshot, api_logs_ws,
 };
 pub use types::DashboardAuthProvider;
-pub use validation::{validation_auth_base_url, validation_request_headers};
+pub use validation::{resolve_auth_validation_concurrency, validation_auth_base_url, validation_request_headers};
 pub(super) use validation_ws::{api_validate_codex_auths_ws, api_validate_grok_auths_ws};
 
 use salvo::prelude::*;

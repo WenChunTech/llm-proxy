@@ -18,6 +18,10 @@ import {
   type AuthValidationJob,
 } from '../lib/authValidationProgress'
 import { streamAuthValidation } from '../lib/authValidationStream'
+import {
+  persistAuthValidationConcurrency,
+  readStoredAuthValidationConcurrency,
+} from '../lib/storage'
 import type {
   AuthProviderKind,
   AuthStatus,
@@ -46,6 +50,9 @@ export function useAuthValidation(options: {
 
   const [authValidation, setAuthValidation] = useState<AuthValidationState | null>(null)
   const [validationJobs, setValidationJobs] = useState<AuthValidationJob[]>([])
+  const [validationConcurrency, setValidationConcurrencyState] = useState(() =>
+    readStoredAuthValidationConcurrency(),
+  )
   const providersRef = useRef(providers)
   providersRef.current = providers
   const authValidationRef = useRef(authValidation)
@@ -113,6 +120,7 @@ export function useAuthValidation(options: {
         accessKey,
         providers: providersRef.current,
         targets,
+        concurrency: validationConcurrency,
         handlers: {
           onStarted: (event) => {
             upsertJob(jobId, {
@@ -210,6 +218,7 @@ export function useAuthValidation(options: {
       setProviders,
       setToast,
       upsertJob,
+      validationConcurrency,
     ],
   )
 
@@ -332,9 +341,21 @@ export function useAuthValidation(options: {
     )
   }
 
+  function setValidationConcurrency(value: number) {
+    const next = persistAuthValidationConcurrency(value)
+    setValidationConcurrencyState(next)
+  }
+
+  function clearAuthValidation() {
+    setAuthValidation(null)
+  }
+
   return {
     authValidation,
     validationJobs,
+    validationConcurrency,
+    setValidationConcurrency,
+    clearAuthValidation,
     isKindValidating: (kind: AuthProviderKind) => isKindValidating(validationJobs, kind),
     isProviderValidating: (kind: AuthProviderKind, providerIndex: number) =>
       isProviderValidating(validationJobs, kind, providerIndex),

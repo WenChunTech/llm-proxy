@@ -41,20 +41,26 @@ pub fn responses_endpoint(base_url: &str) -> Result<String, ProxyError> {
 }
 
 pub fn codex_oauth_base_url(provider_base_url: Option<&str>, auth: &CodexAuth) -> String {
-    auth.base_url
-        .as_deref()
+    provider_base_url
         .filter(|value| !value.trim().is_empty())
-        .or_else(|| provider_base_url.filter(|value| !value.trim().is_empty()))
+        .or_else(|| {
+            auth.base_url
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+        })
         .unwrap_or(DEFAULT_CODEX_BASE_URL)
         .trim_end_matches('/')
         .to_string()
 }
 
 pub fn grok_oauth_base_url(provider_base_url: Option<&str>, auth: &GrokAuth) -> String {
-    auth.base_url
-        .as_deref()
+    provider_base_url
         .filter(|value| !value.trim().is_empty())
-        .or_else(|| provider_base_url.filter(|value| !value.trim().is_empty()))
+        .or_else(|| {
+            auth.base_url
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+        })
         .unwrap_or(DEFAULT_GROK_BASE_URL)
         .trim_end_matches('/')
         .to_string()

@@ -1,5 +1,6 @@
 import { effectiveBaseUrlForProvider } from '../config/providers'
 import type { ProviderDraft, ProviderKind, ProviderModelEntry } from '../types/domain'
+import { firstAuthAccessToken } from './authValues'
 import { shellQuote } from './browser'
 
 export function buildProviderTestCurl(provider: ProviderDraft, model: string, prompt: string, stream: boolean) {
@@ -18,15 +19,18 @@ function buildProviderTestRequest(provider: ProviderDraft, model: string, prompt
     stream,
   )
   const headers: Record<string, string> = { 'content-type': 'application/json' }
+  const authToken = provider.apiKey.trim() ||
+    (provider.kind === 'codex' || provider.kind === 'grok' ? firstAuthAccessToken(provider.auth) : '')
   if (stream) headers.accept = 'text/event-stream'
   if (provider.kind === 'claude') {
     headers['x-api-key'] = provider.apiKey
+    headers.authorization = `Bearer ${provider.apiKey}`
     headers['anthropic-version'] = '2023-06-01'
   } else if (provider.kind === 'gemini') {
     headers['x-goog-api-key'] = provider.apiKey
     headers.authorization = `Bearer ${provider.apiKey}`
   } else {
-    headers.authorization = `Bearer ${provider.apiKey}`
+    headers.authorization = `Bearer ${authToken}`
   }
   if (provider.kind === 'codex') {
     headers['user-agent'] = 'codex-tui/0.135.0'

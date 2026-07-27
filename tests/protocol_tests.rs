@@ -6,6 +6,10 @@ fn assert_object(value: &Value) {
     assert!(value.is_object(), "converted value must be an object: {value}");
 }
 
+fn tool_type(tool: &Value) -> Option<&str> {
+    tool.get("type").and_then(Value::as_str)
+}
+
 #[test]
 fn protocol_conversion_matrix_covers_all_non_identity_core_pairs() {
     // Grok is a first-class protocol with its own native converters, so it
@@ -76,6 +80,77 @@ fn grok_request_conversions_from_core_protocols() {
     });
     let out = convert_request(gemini, ProviderType::Gemini, ProviderType::Grok).expect("gemini->grok");
     assert_object(&out);
+}
+
+#[test]
+fn responses_to_grok_accepts_shell_tool_environment() {
+    let responses = json!({
+        "model": "grok-4.5",
+        "input": "hi",
+        "stream": true,
+        "tools": [
+            {
+                "type": "shell",
+                "environment": {
+                    "type": "local",
+                    "skills": {
+                        "name": "repo",
+                        "description": "Repository context",
+                        "path": "/tmp/repo"
+                    }
+                }
+            }
+        ]
+    });
+
+    let out =
+        convert_request(responses, ProviderType::Responses, ProviderType::Grok).expect("resp->grok");
+
+    assert_eq!(out["tools"][0]["type"], "shell");
+    assert_eq!(out["tools"][0]["environment"]["type"], "local");
+}
+
+#[test]
+fn responses_to_grok_accepts_namespace_tools() {
+    let responses = json!({
+        "model": "grok-4.5",
+        "input": "hi",
+        "stream": true,
+        "tools": [
+            {
+                "type": "namespace",
+                "name": "multi_agent_v1",
+                "description": "Multi-agent tools",
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "spawn_agent",
+                        "description": "Spawn an agent",
+                        "strict": false,
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "message": {"type": "string"}
+                            },
+                            "required": ["message"],
+                            "additionalProperties": false
+                        }
+                    }
+                ]
+            }
+        ]
+    });
+
+    let out =
+        convert_request(responses, ProviderType::Responses, ProviderType::Grok).expect("resp->grok");
+
+    assert!(out.get("tools").is_none_or(|tools| {
+        tools.as_array().is_none_or(|tools| {
+            !tools
+                .iter()
+                .any(|tool| tool_type(tool) == Some("namespace"))
+        })
+    }));
 }
 
 #[test]

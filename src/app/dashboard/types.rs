@@ -89,6 +89,9 @@ pub(super) struct AuthValidateRequest {
     pub provider_indices: Option<Vec<usize>>,
     #[serde(default)]
     pub targets: Option<Vec<AuthValidateTarget>>,
+    /// Concurrent auth probes. Defaults to 5 when omitted/invalid.
+    #[serde(default, alias = "maxConcurrency")]
+    pub concurrency: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -18,6 +18,10 @@ impl ClaudeProvider {
             &[
                 ("content-type", "application/json".to_string()),
                 ("x-api-key", request.config.base.api_key.clone()),
+                (
+                    "authorization",
+                    format!("Bearer {}", request.config.base.api_key),
+                ),
                 ("anthropic-version", "2023-06-01".to_string()),
             ],
             &request.config.base.headers,

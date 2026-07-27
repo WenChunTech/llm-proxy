@@ -149,7 +149,10 @@ function App() {
             isTargetValidating={authValidation.isTargetValidating}
             providerValidationProgress={authValidation.providerValidationProgress}
             authValidation={authValidation.authValidation}
+            validationConcurrency={authValidation.validationConcurrency}
+            onValidationConcurrencyChange={authValidation.setValidationConcurrency}
             onAuthValidationFilterChange={authValidation.setAuthValidationFilter}
+            onClearAuthValidation={authValidation.clearAuthValidation}
             onValidateVisibleAuths={authValidation.validateVisibleAuthResults}
             onEnableVisibleAuths={authValidation.enableVisibleAuthResults}
             onDisableVisibleAuths={authValidation.disableVisibleAuthResults}

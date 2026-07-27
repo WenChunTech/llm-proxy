@@ -19,7 +19,7 @@ fn responses_endpoint_keeps_explicit_responses_path() {
 }
 
 #[test]
-fn codex_oauth_base_url_prefers_auth_base_url() {
+fn codex_oauth_base_url_prefers_provider_base_url() {
     let auth: CodexAuth = serde_json::from_value(json!({
         "base_url": "https://chatgpt.example/backend-api/codex/"
     }))
@@ -27,17 +27,41 @@ fn codex_oauth_base_url_prefers_auth_base_url() {
 
     let base_url = codex_oauth_base_url(Some("https://provider.example/codex"), &auth);
 
+    assert_eq!(base_url, "https://provider.example/codex");
+}
+
+#[test]
+fn codex_oauth_base_url_falls_back_to_auth_base_url() {
+    let auth: CodexAuth = serde_json::from_value(json!({
+        "base_url": "https://chatgpt.example/backend-api/codex/"
+    }))
+    .unwrap();
+
+    let base_url = codex_oauth_base_url(None, &auth);
+
     assert_eq!(base_url, "https://chatgpt.example/backend-api/codex");
 }
 
 #[test]
-fn grok_oauth_base_url_prefers_auth_base_url() {
+fn grok_oauth_base_url_prefers_provider_base_url() {
+    let auth: GrokAuth = serde_json::from_value(json!({
+        "base_url": "https://api.x.ai/v1/"
+    }))
+    .unwrap();
+
+    let base_url = grok_oauth_base_url(Some("https://cli-chat-proxy.grok.com/v1"), &auth);
+
+    assert_eq!(base_url, "https://cli-chat-proxy.grok.com/v1");
+}
+
+#[test]
+fn grok_oauth_base_url_falls_back_to_auth_base_url() {
     let auth: GrokAuth = serde_json::from_value(json!({
         "base_url": "https://cli-chat-proxy.grok.com/v1/"
     }))
     .unwrap();
 
-    let base_url = grok_oauth_base_url(Some("https://api.x.ai/v1"), &auth);
+    let base_url = grok_oauth_base_url(None, &auth);
 
     assert_eq!(base_url, "https://cli-chat-proxy.grok.com/v1");
 }
