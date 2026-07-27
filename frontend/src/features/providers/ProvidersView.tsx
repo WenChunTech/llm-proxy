@@ -11,8 +11,8 @@ import type {
   ProviderKindFilter,
 } from '../../types/domain'
 import { ProviderCard } from './ProviderCard'
+import { AuthValidationResultRow } from './authValidationView'
 import {
-  AuthValidationResultRow,
   authValidationFilterOptions,
   authValidationSummary,
   buildAuthValidationLookup,
@@ -21,7 +21,7 @@ import {
   providerAuthStats,
   providerAuthTargets,
   visibleAuthValidationResults,
-} from './authValidationView'
+} from './authValidationViewData'
 
 const AUTH_VALIDATION_CONCURRENCY_MIN = 1
 
