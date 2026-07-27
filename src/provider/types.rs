@@ -69,7 +69,9 @@ impl ProviderType {
     /// Upstream wire protocol used for request conversion.
     pub fn wire_protocol(self) -> Self {
         match self {
-            Self::Codex | Self::Grok => Self::Responses,
+            // Codex speaks the OpenAI Responses wire protocol. Grok is a
+            // first-class protocol with its own native converters.
+            Self::Codex => Self::Responses,
             other => other,
         }
     }

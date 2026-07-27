@@ -1,4 +1,4 @@
-use converter::models::{claude, gemini, gemini_cli, openai};
+use converter::models::{claude, gemini, gemini_cli, grok, openai};
 use serde_json::Value;
 
 use crate::{error::ProxyError, provider::types::ProviderType};
@@ -7,15 +7,23 @@ pub const SUPPORTED_PROTOCOL_CONVERSIONS: &[(ProviderType, ProviderType)] = &[
     (ProviderType::Chat, ProviderType::Responses),
     (ProviderType::Chat, ProviderType::Claude),
     (ProviderType::Chat, ProviderType::Gemini),
+    (ProviderType::Chat, ProviderType::Grok),
     (ProviderType::Responses, ProviderType::Chat),
     (ProviderType::Responses, ProviderType::Claude),
     (ProviderType::Responses, ProviderType::Gemini),
+    (ProviderType::Responses, ProviderType::Grok),
     (ProviderType::Claude, ProviderType::Chat),
     (ProviderType::Claude, ProviderType::Responses),
     (ProviderType::Claude, ProviderType::Gemini),
+    (ProviderType::Claude, ProviderType::Grok),
     (ProviderType::Gemini, ProviderType::Chat),
     (ProviderType::Gemini, ProviderType::Responses),
     (ProviderType::Gemini, ProviderType::Claude),
+    (ProviderType::Gemini, ProviderType::Grok),
+    (ProviderType::Grok, ProviderType::Chat),
+    (ProviderType::Grok, ProviderType::Responses),
+    (ProviderType::Grok, ProviderType::Claude),
+    (ProviderType::Grok, ProviderType::Gemini),
 ];
 
 pub fn convert_request(
@@ -82,6 +90,36 @@ pub fn convert_request(
             let cli: gemini_cli::Request = req.into();
             let out: claude::Request = cli.into();
             Ok(serde_json::to_value(out)?)
+        }
+        (ProviderType::Chat, ProviderType::Grok) => {
+            map::<openai::chat::Request, grok::Request>(body)
+        }
+        (ProviderType::Responses, ProviderType::Grok) => {
+            map::<openai::responses::Request, grok::Request>(body)
+        }
+        (ProviderType::Claude, ProviderType::Grok) => {
+            map::<claude::Request, grok::Request>(body)
+        }
+        (ProviderType::Gemini, ProviderType::Grok) => {
+            let req: gemini::Request = serde_json::from_value(body)?;
+            let cli: gemini_cli::Request = req.into();
+            let out: grok::Request = cli.into();
+            Ok(serde_json::to_value(out)?)
+        }
+        (ProviderType::Grok, ProviderType::Chat) => {
+            map::<grok::Request, openai::chat::Request>(body)
+        }
+        (ProviderType::Grok, ProviderType::Responses) => {
+            map::<grok::Request, openai::responses::Request>(body)
+        }
+        (ProviderType::Grok, ProviderType::Claude) => {
+            map::<grok::Request, claude::Request>(body)
+        }
+        (ProviderType::Grok, ProviderType::Gemini) => {
+            let req: grok::Request = serde_json::from_value(body)?;
+            let cli: gemini_cli::Request = req.into();
+            let gemini: gemini::Request = cli.into();
+            Ok(serde_json::to_value(gemini)?)
         }
         _ => unreachable!("supported request conversion is not implemented"),
     }
@@ -151,6 +189,36 @@ pub fn convert_response(
             let cli: gemini_cli::Response = resp.into();
             let out: claude::Response = cli.into();
             Ok(serde_json::to_value(out)?)
+        }
+        (ProviderType::Chat, ProviderType::Grok) => {
+            map::<openai::chat::Response, grok::Response>(body)
+        }
+        (ProviderType::Responses, ProviderType::Grok) => {
+            map::<openai::responses::Response, grok::Response>(body)
+        }
+        (ProviderType::Claude, ProviderType::Grok) => {
+            map::<claude::Response, grok::Response>(body)
+        }
+        (ProviderType::Gemini, ProviderType::Grok) => {
+            let resp: gemini::Response = serde_json::from_value(body)?;
+            let cli: gemini_cli::Response = resp.into();
+            let out: grok::Response = cli.into();
+            Ok(serde_json::to_value(out)?)
+        }
+        (ProviderType::Grok, ProviderType::Chat) => {
+            map::<grok::Response, openai::chat::Response>(body)
+        }
+        (ProviderType::Grok, ProviderType::Responses) => {
+            map::<grok::Response, openai::responses::Response>(body)
+        }
+        (ProviderType::Grok, ProviderType::Claude) => {
+            map::<grok::Response, claude::Response>(body)
+        }
+        (ProviderType::Grok, ProviderType::Gemini) => {
+            let resp: grok::Response = serde_json::from_value(body)?;
+            let cli: gemini_cli::Response = resp.into();
+            let gemini: gemini::Response = cli.into();
+            Ok(serde_json::to_value(gemini)?)
         }
         _ => unreachable!("supported response conversion is not implemented"),
     }

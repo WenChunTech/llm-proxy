@@ -1,15 +1,15 @@
 use converter::{
     convert::{
-        ChatStreamWrapper, ClaudeStreamWrapper, GeminiCLiStreamWrapper, ResponsesStreamWrapper,
-        StreamState,
+        ChatStreamWrapper, ClaudeStreamWrapper, GeminiCLiStreamWrapper, GrokStreamWrapper,
+        ResponsesStreamWrapper, StreamState,
     },
-    models::{claude, gemini, gemini_cli, openai},
+    models::{claude, gemini, gemini_cli, grok, openai},
 };
 use serde_json::Value;
 
 use crate::{
     error::ProxyError,
-    provider::types::ProviderType,
+    provider::{rewrite_response, types::ProviderType},
     stream::sse::{OutboundSseEvent, SseEvent},
 };
 
@@ -46,17 +46,22 @@ impl StreamConverterImpl {
 #[derive(Debug, Clone, Default)]
 pub struct StreamContext {
     pub responses_request: Option<openai::responses::Request>,
+    pub grok_request: Option<grok::Request>,
 }
 
 impl StreamContext {
     pub fn from_request(target: ProviderType, body: &Value) -> Self {
-        if target != ProviderType::Responses {
-            return Self::default();
-        }
-
-        Self {
+        match target {
             // Deserialize from borrowed Value to avoid cloning large request bodies.
-            responses_request: serde::Deserialize::deserialize(body).ok(),
+            ProviderType::Responses => Self {
+                responses_request: serde::Deserialize::deserialize(body).ok(),
+                grok_request: None,
+            },
+            ProviderType::Grok => Self {
+                responses_request: None,
+                grok_request: serde::Deserialize::deserialize(body).ok(),
+            },
+            _ => Self::default(),
         }
     }
 }
@@ -74,12 +79,14 @@ impl ProtocolStreamConverter {
         }
 
         let data: Value = serde_json::from_str(&event.data)?;
+        let data = rewrite_response(self.source, data)?;
         let chunks = match self.source {
             ProviderType::Chat => self.convert_chat(data)?,
             ProviderType::Responses => self.convert_responses(data)?,
             ProviderType::Claude => self.convert_claude(data)?,
             ProviderType::Gemini => self.convert_gemini(data)?,
-            ProviderType::Codex | ProviderType::Grok => Vec::new(),
+            ProviderType::Grok => self.convert_grok(data)?,
+            ProviderType::Codex => Vec::new(),
         };
         Ok(chunks)
     }
@@ -116,8 +123,17 @@ impl ProtocolStreamConverter {
                     converted.chunks.into_iter().map(Into::into).collect();
                 values_to_events(chunks)
             }
+            ProviderType::Grok => {
+                let wrapper = ChatStreamWrapper {
+                    chunk,
+                    state: self.take_state(),
+                };
+                let converted: converter::convert::GrokStreamsWrapper = wrapper.into();
+                self.state = converted.state;
+                values_to_events(converted.chunks)
+            }
             ProviderType::Chat => Ok(Vec::new()),
-            ProviderType::Codex | ProviderType::Grok => Ok(Vec::new()),
+            ProviderType::Codex => Ok(Vec::new()),
         }
     }
 
@@ -231,6 +247,48 @@ impl ProtocolStreamConverter {
         }
     }
 
+    fn convert_grok(&mut self, data: Value) -> Result<Vec<OutboundSseEvent>, ProxyError> {
+        let chunk: grok::StreamResponse = serde_json::from_value(data)?;
+        match self.target {
+            ProviderType::Chat => {
+                let wrapper = GrokStreamWrapper {
+                    chunk,
+                    state: self.take_state(),
+                };
+                let converted: converter::convert::ChatStreamsWrapper = wrapper.into();
+                self.state = converted.state;
+                values_to_events(converted.chunks)
+            }
+            ProviderType::Claude => {
+                let wrapper = GrokStreamWrapper {
+                    chunk,
+                    state: self.take_state(),
+                };
+                let converted: converter::convert::ClaudeStreamsWrapper = wrapper.into();
+                self.state = converted.state;
+                values_to_events(converted.chunks)
+            }
+            ProviderType::Gemini => {
+                let wrapper = GrokStreamWrapper {
+                    chunk,
+                    state: self.take_state(),
+                };
+                let converted: converter::convert::GeminiCLiStreamsWrapper = wrapper.into();
+                self.state = converted.state;
+                let chunks: Vec<gemini::Response> =
+                    converted.chunks.into_iter().map(Into::into).collect();
+                values_to_events(chunks)
+            }
+            ProviderType::Responses => {
+                // Grok stream events map 1:1 onto OpenAI Responses events.
+                let converted: openai::responses::StreamResponse = chunk.into();
+                values_to_events(vec![converted])
+            }
+            ProviderType::Grok => Ok(Vec::new()),
+            ProviderType::Codex => Ok(Vec::new()),
+        }
+    }
+
     fn take_state(&mut self) -> StreamState {
         std::mem::replace(&mut self.state, StreamState::Empty)
     }
@@ -275,6 +333,37 @@ fn initial_state(
             }
         }
         (ProviderType::Gemini, ProviderType::Claude) => StreamState::gemini_cli_to_claude(),
+        // Grok as upstream source: native Grok stream events -> client protocol.
+        (ProviderType::Grok, ProviderType::Chat) => StreamState::grok_to_chat(),
+        (ProviderType::Grok, ProviderType::Claude) => StreamState::grok_to_claude(),
+        (ProviderType::Grok, ProviderType::Gemini) => StreamState::grok_to_gemini_cli(),
+        (ProviderType::Grok, ProviderType::Responses) => StreamState::grok_to_responses(),
+        // Client protocol -> Grok upstream: seed the source-derived request when available.
+        (ProviderType::Chat, ProviderType::Grok) => {
+            let state = StreamState::chat_to_grok();
+            if let Some(request) = context.grok_request {
+                state.with_chat_grok_request(request)
+            } else {
+                state
+            }
+        }
+        (ProviderType::Claude, ProviderType::Grok) => {
+            let state = StreamState::claude_to_grok();
+            if let Some(request) = context.grok_request {
+                state.with_claude_grok_request(request)
+            } else {
+                state
+            }
+        }
+        (ProviderType::Gemini, ProviderType::Grok) => {
+            let state = StreamState::gemini_cli_to_grok();
+            if let Some(request) = context.grok_request {
+                state.with_gemini_cli_grok_request(request)
+            } else {
+                state
+            }
+        }
+        (ProviderType::Responses, ProviderType::Grok) => StreamState::responses_to_grok(),
         _ => StreamState::Empty,
     }
 }

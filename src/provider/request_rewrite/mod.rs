@@ -57,7 +57,10 @@ fn profile_for(provider: ProviderType) -> ProviderRequestProfile {
             sets_stream: true,
         },
         ProviderType::Grok => ProviderRequestProfile {
-            wire: ProviderType::Responses,
+            // Grok is a first-class protocol with its own native wire shape and
+            // converters. The dialect rewrite fires only when the client already
+            // speaks Grok (source == wire).
+            wire: ProviderType::Grok,
             rewrite: Some(grok::rewrite),
             sets_stream: true,
         },
