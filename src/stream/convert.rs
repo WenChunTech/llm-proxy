@@ -1,6 +1,6 @@
 use converter::{
     convert::{
-        ChatStreamWrapper, ClaudeStreamWrapper, GeminiCLiStreamWrapper, GrokStreamWrapper,
+        ChatStreamWrapper, ClaudeStreamWrapper, GeminiCliStreamWrapper, GrokStreamWrapper,
         ResponsesStreamWrapper, StreamState,
     },
     models::{claude, gemini, gemini_cli, grok, openai},
@@ -117,7 +117,7 @@ impl ProtocolStreamConverter {
                     chunk,
                     state: self.take_state(),
                 };
-                let converted: converter::convert::GeminiCLiStreamsWrapper = wrapper.into();
+                let converted: converter::convert::GeminiCliStreamsWrapper = wrapper.into();
                 self.state = converted.state;
                 let chunks: Vec<gemini::Response> =
                     converted.chunks.into_iter().map(Into::into).collect();
@@ -163,7 +163,7 @@ impl ProtocolStreamConverter {
                     chunk,
                     state: self.take_state(),
                 };
-                let converted: converter::convert::GeminiCLiStreamsWrapper = wrapper.into();
+                let converted: converter::convert::GeminiCliStreamsWrapper = wrapper.into();
                 self.state = converted.state;
                 let chunks: Vec<gemini::Response> =
                     converted.chunks.into_iter().map(Into::into).collect();
@@ -200,7 +200,7 @@ impl ProtocolStreamConverter {
                     chunk,
                     state: self.take_state(),
                 };
-                let converted: converter::convert::GeminiCLiStreamsWrapper = wrapper.into();
+                let converted: converter::convert::GeminiCliStreamsWrapper = wrapper.into();
                 self.state = converted.state;
                 let chunks: Vec<gemini::Response> =
                     converted.chunks.into_iter().map(Into::into).collect();
@@ -216,7 +216,7 @@ impl ProtocolStreamConverter {
         let chunk: gemini_cli::Response = chunk.into();
         match self.target {
             ProviderType::Chat => {
-                let wrapper = GeminiCLiStreamWrapper {
+                let wrapper = GeminiCliStreamWrapper {
                     chunk,
                     state: self.take_state(),
                 };
@@ -225,7 +225,7 @@ impl ProtocolStreamConverter {
                 values_to_events(converted.chunks)
             }
             ProviderType::Responses => {
-                let wrapper = GeminiCLiStreamWrapper {
+                let wrapper = GeminiCliStreamWrapper {
                     chunk,
                     state: self.take_state(),
                 };
@@ -234,7 +234,7 @@ impl ProtocolStreamConverter {
                 values_to_events(converted.chunks)
             }
             ProviderType::Claude => {
-                let wrapper = GeminiCLiStreamWrapper {
+                let wrapper = GeminiCliStreamWrapper {
                     chunk,
                     state: self.take_state(),
                 };
@@ -273,7 +273,7 @@ impl ProtocolStreamConverter {
                     chunk,
                     state: self.take_state(),
                 };
-                let converted: converter::convert::GeminiCLiStreamsWrapper = wrapper.into();
+                let converted: converter::convert::GeminiCliStreamsWrapper = wrapper.into();
                 self.state = converted.state;
                 let chunks: Vec<gemini::Response> =
                     converted.chunks.into_iter().map(Into::into).collect();

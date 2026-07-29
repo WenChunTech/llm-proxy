@@ -262,8 +262,8 @@ dependencies = [
 
 [[package]]
 name = "converter"
-version = "0.1.0"
-source = "git+ssh://git@github.com/WenChunTech/converter.git?branch=master#be5f4b392eefefc364f8682d45ca8f954f7b98c4"
+version = "1.0.0"
+source = "git+ssh://git@github.com/WenChunTech/converter.git?branch=master#32089875efd8caa8e2d91038c7df7697140c9dc5"
 dependencies = [
  "serde",
  "serde_json",
