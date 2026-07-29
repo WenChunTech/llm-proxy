@@ -1,6 +1,7 @@
 import { Icon } from '../../components/Icon'
 import { SelectControl } from '../../components/controls/SelectControl'
 import { defaultPriority, providerMeta, providerMarkText } from '../../config/providers'
+import { moveItemByAction, reorderItem } from '../../lib/list'
 import type { ListMoveAction } from '../../lib/list'
 import type { Provider, ProviderKind } from '../../types/domain'
 import { useState } from 'react'
@@ -44,6 +45,7 @@ export function RoutingView({
 }) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [draggedFallbackIndex, setDraggedFallbackIndex] = useState<number | null>(null)
+  const [draggedAliasTarget, setDraggedAliasTarget] = useState<{ source: string; index: number } | null>(null)
   const [aliasSource, setAliasSource] = useState('')
   const [aliasTarget, setAliasTarget] = useState('')
   const configuredModelOptions = configuredModels.map((model) => ({ value: model, label: model }))
@@ -139,6 +141,26 @@ export function RoutingView({
       const nextAliases = { ...current }
       delete nextAliases[source]
       return nextAliases
+    })
+  }
+
+  function moveAliasTarget(source: string, index: number, action: ListMoveAction) {
+    onUpdateModelAliases((current) => {
+      const existing = current[source]
+      if (!existing?.length) return current
+      const nextTargets = moveItemByAction(existing, index, action)
+      if (!nextTargets) return current
+      return { ...current, [source]: nextTargets }
+    })
+  }
+
+  function reorderAliasTarget(source: string, fromIndex: number, toIndex: number) {
+    onUpdateModelAliases((current) => {
+      const existing = current[source]
+      if (!existing?.length) return current
+      const nextTargets = reorderItem(existing, fromIndex, toIndex)
+      if (!nextTargets) return current
+      return { ...current, [source]: nextTargets }
     })
   }
 
@@ -281,6 +303,8 @@ export function RoutingView({
             <div className="alias-add-fields">
               <SelectControl
                 mono
+                searchable
+                searchPlaceholder="筛选主模型…"
                 value={aliasSource}
                 options={configuredModelOptions.length ? aliasSourceOptions : [{ value: '', label: '暂无可选模型' }]}
                 onChange={setAliasSource}
@@ -290,6 +314,8 @@ export function RoutingView({
               <span className="alias-arrow" aria-hidden="true">→</span>
               <SelectControl
                 mono
+                searchable
+                searchPlaceholder="筛选备用模型…"
                 value={aliasTarget}
                 options={configuredModelOptions.length ? aliasTargetOptions : [{ value: '', label: '暂无可选模型' }]}
                 onChange={setAliasTarget}
@@ -327,6 +353,8 @@ export function RoutingView({
                 <div className="alias-source-control">
                   <SelectControl
                     mono
+                    searchable
+                    searchPlaceholder="筛选主模型…"
                     value={source}
                     options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: '暂无可选模型' }]}
                     onChange={(nextSource) => updateAliasSource(source, nextSource)}
@@ -337,14 +365,71 @@ export function RoutingView({
                 <span className="alias-arrow" aria-hidden="true">→</span>
                 <div className="alias-targets">
                   {targets.map((target, index) => (
-                    <span className="alias-target-chip" key={`${source}:${target}`}>
+                    <span
+                      className={`alias-target-chip ${draggedAliasTarget?.source === source && draggedAliasTarget.index === index ? 'is-dragging' : ''}`}
+                      key={`${source}:${target}`}
+                      draggable={targets.length > 1}
+                      title={targets.length > 1 ? '拖动调整备用顺序' : undefined}
+                      onDragStart={(event) => {
+                        if (targets.length <= 1) {
+                          event.preventDefault()
+                          return
+                        }
+                        setDraggedAliasTarget({ source, index })
+                        event.dataTransfer.effectAllowed = 'move'
+                        event.dataTransfer.setData('text/plain', `${source}:${target}`)
+                      }}
+                      onDragOver={(event) => {
+                        if (draggedAliasTarget?.source !== source) return
+                        event.preventDefault()
+                        event.dataTransfer.dropEffect = 'move'
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault()
+                        if (draggedAliasTarget?.source === source) {
+                          reorderAliasTarget(source, draggedAliasTarget.index, index)
+                        }
+                        setDraggedAliasTarget(null)
+                      }}
+                      onDragEnd={() => setDraggedAliasTarget(null)}
+                    >
+                      {targets.length > 1 && (
+                        <span className="alias-chip-grip" aria-hidden="true">
+                          <Icon name="grip" size={12} />
+                        </span>
+                      )}
                       <span className="alias-target-index">{index + 1}</span>
                       <code>{target}</code>
+                      {targets.length > 1 && (
+                        <span className="alias-chip-actions">
+                          <button
+                            className="alias-chip-move"
+                            type="button"
+                            title="上移"
+                            disabled={index === 0}
+                            onClick={() => moveAliasTarget(source, index, -1)}
+                            onPointerDown={(event) => event.stopPropagation()}
+                          >
+                            <Icon name="arrowUp" size={12} />
+                          </button>
+                          <button
+                            className="alias-chip-move"
+                            type="button"
+                            title="下移"
+                            disabled={index === targets.length - 1}
+                            onClick={() => moveAliasTarget(source, index, 1)}
+                            onPointerDown={(event) => event.stopPropagation()}
+                          >
+                            <Icon name="arrowDown" size={12} />
+                          </button>
+                        </span>
+                      )}
                       <button
                         className="alias-chip-remove"
                         type="button"
                         title={`移除 ${target}`}
                         onClick={() => removeAliasTarget(source, target)}
+                        onPointerDown={(event) => event.stopPropagation()}
                       >
                         <Icon name="close" size={12} />
                       </button>
@@ -353,6 +438,8 @@ export function RoutingView({
                   <div className="alias-target-add">
                     <SelectControl
                       mono
+                      searchable
+                      searchPlaceholder="筛选备用模型…"
                       value=""
                       options={[
                         { value: '', label: '+ 添加目标' },

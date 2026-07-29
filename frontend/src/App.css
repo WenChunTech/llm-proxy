@@ -1747,6 +1747,52 @@ code {
   box-shadow: 0 18px 45px rgba(23, 37, 52, 0.15);
 }
 
+.select-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  margin: -1px -1px 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #e5eef3;
+  background: color-mix(in srgb, var(--paper) 92%, #f4f8fa);
+}
+
+.select-search .icon {
+  flex: 0 0 auto;
+  color: #8b9aa5;
+}
+
+.select-search input {
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  border: 0;
+  outline: none;
+  color: var(--field-ink);
+  font: inherit;
+  font-size: 12px;
+  background: transparent;
+}
+
+.select-search input::placeholder {
+  color: #93a3ae;
+}
+
+.select-empty {
+  padding: 10px 8px;
+  color: #8a9aa6;
+  font-size: 12px;
+  text-align: center;
+}
+
+.searchable-select .select-menu {
+  max-height: min(320px, 50vh);
+}
+
 .select-option {
   display: flex;
   align-items: center;
@@ -2293,9 +2339,63 @@ code {
   flex: 0 0 auto;
 }
 
+.alias-target-chip.is-dragging {
+  opacity: 0.55;
+}
+
+.alias-target-chip[draggable='true'] {
+  cursor: grab;
+}
+
+.alias-target-chip[draggable='true']:active {
+  cursor: grabbing;
+}
+
+.alias-chip-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #9aabb6;
+  flex: 0 0 auto;
+}
+
+.alias-chip-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.alias-chip-move {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: #8b9aa5;
+  background: transparent;
+  cursor: pointer;
+  transition: 140ms ease;
+  flex: 0 0 auto;
+}
+
+.alias-chip-move:hover:not(:disabled) {
+  color: #0d927d;
+  background: rgba(13, 146, 125, 0.12);
+}
+
+.alias-chip-move:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .alias-target-chip code {
   min-width: 0;
-  max-width: min(280px, 36vw);
+  max-width: min(220px, 28vw);
   overflow: hidden;
   color: #3f5362;
   font-size: 12px;
@@ -3171,6 +3271,31 @@ code {
 :root[data-theme='dark'] .alias-chip-remove:hover {
   color: #f0a0a0;
   background: rgba(224, 160, 160, 0.12);
+}
+
+:root[data-theme='dark'] .select-search {
+  border-bottom-color: #2a3640;
+  background: color-mix(in srgb, var(--paper) 88%, #0d141b);
+}
+
+:root[data-theme='dark'] .select-search .icon,
+:root[data-theme='dark'] .select-empty,
+:root[data-theme='dark'] .alias-chip-grip,
+:root[data-theme='dark'] .alias-chip-move {
+  color: #8ea0ad;
+}
+
+:root[data-theme='dark'] .select-search input {
+  color: var(--field-ink);
+}
+
+:root[data-theme='dark'] .select-search input::placeholder {
+  color: #7f919e;
+}
+
+:root[data-theme='dark'] .alias-chip-move:hover:not(:disabled) {
+  color: #6fd6b8;
+  background: rgba(111, 214, 184, 0.12);
 }
 
 :root[data-theme='dark'] .alias-target-add .select-control {
