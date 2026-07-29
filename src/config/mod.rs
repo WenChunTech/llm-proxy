@@ -24,7 +24,7 @@ pub struct Config {
     pub log_level: Option<String>,
     pub model_priority: Vec<String>,
     pub fallback_models: Vec<String>,
-    pub model_aliases: HashMap<String, String>,
+    pub model_aliases: HashMap<String, Vec<String>>,
     pub providers: ProviderGroups,
     pub retry: RetryConfig,
     /// Persist each request/response body under an ordered directory for debugging.
@@ -74,13 +74,12 @@ impl Config {
         format!("0.0.0.0:{}", self.port)
     }
 
-    pub fn resolve_model_alias(&self, model: &str) -> String {
+    /// Ordered alias targets tried after the requested model itself fails.
+    pub fn alias_targets_for(&self, model: &str) -> &[String] {
         self.model_aliases
             .get(model)
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| model.to_string())
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 }
 fn parse_config_json(raw: &str) -> Result<Config, ProxyError> {
@@ -493,39 +492,52 @@ pub fn validate_config(config: &Config) -> Result<(), ProxyError> {
         .into_iter()
         .flat_map(|(_, _, provider)| provider.models().to_vec())
         .collect();
-    let mut seen_aliases = HashSet::new();
-    for (alias, target) in &config.model_aliases {
-        let alias = alias.trim();
-        let target = target.trim();
-        if alias.is_empty() {
+    let mut seen_alias_sources = HashSet::new();
+    for (source, targets) in &config.model_aliases {
+        let source = source.trim();
+        if source.is_empty() {
             return Err(ProxyError::Config(
-                "model alias name must not be empty".to_string(),
+                "model alias source must not be empty".to_string(),
             ));
         }
-        if target.is_empty() {
+        if !seen_alias_sources.insert(source.to_string()) {
             return Err(ProxyError::Config(format!(
-                "model alias '{alias}' target must not be empty"
+                "duplicate model alias source: {source}"
             )));
         }
-        if !seen_aliases.insert(alias.to_string()) {
+        if !configured_models.contains(source) {
             return Err(ProxyError::Config(format!(
-                "duplicate model alias: {alias}"
+                "model alias source '{source}' is not in any provider models"
             )));
         }
-        if alias == target {
+        if targets.is_empty() {
             return Err(ProxyError::Config(format!(
-                "model alias '{alias}' must not target itself"
+                "model alias source '{source}' must have at least one target"
             )));
         }
-        if !configured_models.contains(alias) {
-            return Err(ProxyError::Config(format!(
-                "model alias '{alias}' is not in any provider models"
-            )));
-        }
-        if !configured_models.contains(target) {
-            return Err(ProxyError::Config(format!(
-                "model alias '{alias}' target '{target}' is not in any provider models"
-            )));
+        let mut seen_targets = HashSet::new();
+        for target in targets {
+            let target = target.trim();
+            if target.is_empty() {
+                return Err(ProxyError::Config(format!(
+                    "model alias source '{source}' has an empty target"
+                )));
+            }
+            if source == target {
+                return Err(ProxyError::Config(format!(
+                    "model alias source '{source}' must not target itself"
+                )));
+            }
+            if !seen_targets.insert(target.to_string()) {
+                return Err(ProxyError::Config(format!(
+                    "model alias source '{source}' has duplicate target '{target}'"
+                )));
+            }
+            if !configured_models.contains(target) {
+                return Err(ProxyError::Config(format!(
+                    "model alias source '{source}' target '{target}' is not in any provider models"
+                )));
+            }
         }
     }
 

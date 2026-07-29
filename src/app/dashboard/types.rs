@@ -9,7 +9,7 @@ pub(super) struct DashboardPayload {
     pub providers: Vec<DashboardProvider>,
     pub model_priority: Vec<String>,
     pub fallback_models: Vec<String>,
-    pub model_aliases: std::collections::HashMap<String, String>,
+    pub model_aliases: std::collections::HashMap<String, Vec<String>>,
     pub retry: DashboardRetry,
     pub api_key: String,
     pub api_key_enabled: bool,
@@ -26,7 +26,7 @@ pub(super) struct DashboardConfig {
     pub model_priority: Vec<String>,
     pub fallback_models: Vec<String>,
     #[serde(default)]
-    pub model_aliases: std::collections::HashMap<String, String>,
+    pub model_aliases: std::collections::HashMap<String, Vec<String>>,
     pub retry: DashboardRetry,
     #[serde(default)]
     pub api_key: Option<String>,

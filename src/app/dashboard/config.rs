@@ -37,7 +37,7 @@ pub(super) fn config_payload(snapshot: &AppSnapshot) -> DashboardPayload {
 }
 
 pub(crate) fn models_payload(snapshot: &AppSnapshot) -> Value {
-    let mut data: Vec<Value> = snapshot
+    let data: Vec<Value> = snapshot
         .registry
         .configured_models()
         .into_iter()
@@ -49,21 +49,6 @@ pub(crate) fn models_payload(snapshot: &AppSnapshot) -> Value {
             })
         })
         .collect();
-    let mut aliases: Vec<_> = snapshot.config.model_aliases.iter().collect();
-    aliases.sort_by(|a, b| a.0.cmp(b.0));
-    for (alias, target) in aliases {
-        let alias = alias.trim();
-        let target = target.trim();
-        if alias.is_empty() || target.is_empty() {
-            continue;
-        }
-        data.push(json!({
-            "id": alias,
-            "object": "model",
-            "owned_by": "alias",
-            "root": target
-        }));
-    }
     json!({ "object": "list", "data": data })
 }
 

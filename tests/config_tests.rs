@@ -216,14 +216,15 @@ fn grok_config_allows_api_key_without_auth() {
 }
 
 #[test]
-fn model_aliases_resolve_and_validate_against_provider_models() {
+fn model_aliases_accept_array_targets_and_validate() {
     let config: Config = serde_json::from_value(json!({
         "model_aliases": {
-            "gpt-4o-mini": "gpt-4.1"
+            "gpt-4o-mini": ["gpt-4.1"],
+            "gpt-5.5": ["gpt-5.4", "grok-4.5"]
         },
         "providers": {
             "openai_chat": [{
-                "models": ["gpt-4.1", "gpt-4o-mini"],
+                "models": ["gpt-4.1", "gpt-4o-mini", "gpt-5.5", "gpt-5.4", "grok-4.5"],
                 "base_url": "https://api.openai.com/v1",
                 "api_key": "key",
                 "headers": {
@@ -234,8 +235,15 @@ fn model_aliases_resolve_and_validate_against_provider_models() {
     }))
     .unwrap();
 
-    assert_eq!(config.resolve_model_alias("gpt-4o-mini"), "gpt-4.1");
-    assert_eq!(config.resolve_model_alias("gpt-4.1"), "gpt-4.1");
+    assert_eq!(
+        config.alias_targets_for("gpt-4o-mini"),
+        &["gpt-4.1".to_string()]
+    );
+    assert_eq!(
+        config.alias_targets_for("gpt-5.5"),
+        &["gpt-5.4".to_string(), "grok-4.5".to_string()]
+    );
+    assert!(config.alias_targets_for("missing").is_empty());
     assert_eq!(
         config.providers.openai_chat[0]
             .base
@@ -247,7 +255,7 @@ fn model_aliases_resolve_and_validate_against_provider_models() {
     validate_config(&config).unwrap();
 
     let invalid = Config {
-        model_aliases: HashMap::from([("missing".into(), "gpt-4.1".into())]),
+        model_aliases: HashMap::from([("missing".into(), vec!["gpt-4.1".into()])]),
         providers: ProviderGroups {
             openai_chat: vec![OpenAiChatConfig {
                 base: BaseProviderConfig {

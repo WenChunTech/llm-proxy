@@ -71,8 +71,8 @@ export function FallbackModelModal({
       <form className="modal fallback-picker-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-heading">
           <div>
-            <span className="eyebrow">FALLBACK CHAIN</span>
-            <h2>添加备用模型</h2>
+            <span className="eyebrow">GLOBAL FALLBACKS</span>
+            <h2>添加全局备用模型</h2>
           </div>
           <button className="icon-button" type="button" title="关闭" onClick={onClose}>
             ×

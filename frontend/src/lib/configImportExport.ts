@@ -73,7 +73,7 @@ export function buildConfigExport(
   providers: Provider[],
   priority: ProviderKind[],
   fallbacks: string[],
-  modelAliases: Record<string, string>,
+  modelAliases: Record<string, string[]>,
   retry: RetryConfig,
   apiKey: string,
   port: number,
@@ -189,31 +189,52 @@ function normalizeHeaders(value: unknown): Record<string, string> {
   )
 }
 
-function normalizeModelAliases(value: unknown): Record<string, string> {
+function normalizeAliasTargets(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const targets: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const trimmed = item.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    targets.push(trimmed)
+  }
+  return targets
+}
+
+function normalizeModelAliases(value: unknown): Record<string, string[]> {
   if (!isRecord(value)) return {}
   return Object.fromEntries(
     Object.entries(value)
-      .filter((entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string')
-      .map(([alias, target]) => [alias.trim(), target.trim()])
-      .filter(([alias, target]) => alias && target),
+      .filter((entry): entry is [string, unknown] => typeof entry[0] === 'string')
+      .map(([source, targets]) => [source.trim(), normalizeAliasTargets(targets)] as const)
+      .filter(([source, targets]) => source && targets.length > 0),
   )
 }
 
 export function filterModelAliases(
-  value: Record<string, string> | undefined,
+  value: Record<string, string[]> | undefined,
   availableModels: string[],
 ) {
   const availableModelSet = new Set(availableModels)
   return Object.fromEntries(
     Object.entries(value ?? {})
-      .map(([alias, target]) => [alias.trim(), target.trim()] as const)
+      .map(([source, targets]) => {
+        const trimmedSource = source.trim()
+        const nextTargets = normalizeAliasTargets(targets).filter(
+          (target) =>
+            target &&
+            target !== trimmedSource &&
+            availableModelSet.has(target),
+        )
+        return [trimmedSource, nextTargets] as const
+      })
       .filter(
-        ([alias, target]) =>
-          alias &&
-          target &&
-          alias !== target &&
-          availableModelSet.has(alias) &&
-          availableModelSet.has(target),
+        ([source, targets]) =>
+          source &&
+          targets.length > 0 &&
+          availableModelSet.has(source),
       ),
   )
 }

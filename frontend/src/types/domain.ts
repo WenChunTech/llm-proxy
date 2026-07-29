@@ -53,7 +53,7 @@ export type DashboardPayload = {
   providers: ApiProvider[]
   model_priority: ProviderKind[]
   fallback_models: string[]
-  model_aliases: Record<string, string>
+  model_aliases: Record<string, string[]>
   retry: {
     max_retries: number
     backoff_step_ms: number

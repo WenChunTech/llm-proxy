@@ -46,7 +46,7 @@ server.ts
 - 一个 provider 下可以有多份配置。
 - Gemini CLI 还会展开多个 project；Rust 首版不迁移 Gemini CLI。
 - Codex/Grok 等 provider 可能有多账号；Rust 首版不迁移。
-- `fallback_models` 在代码里是数组链，而 README 示例中是对象映射；Rust 首版按代码行为实现数组链。
+- `fallback_models` 是全局有序备用模型列表：任意主模型失败后按该列表依次尝试（跳过与主模型相同的项）。
 - SSE 目前只解析 `data:` 行，边界处理不足；Rust 版应实现完整 SSE parser。
 
 ## 3. 设计原则
@@ -76,7 +76,7 @@ Node 版 `Provider` 使用 `unknown` config、`Record<string, unknown>` body 和
 - provider 顺序尝试
 - 最多 5 次尝试
 - 线性退避
-- fallback model 链
+- 全局 fallback models
 - 上游 header 透传过滤
 - API key 鉴权
 
@@ -532,7 +532,7 @@ Node 版对所有非 2xx 都继续尝试。Rust 首版可以先保持一致。�
 
 ### 9.1 配置形态
 
-首版采用数组链：
+采用全局有序备用模型列表：
 
 ```json
 {
@@ -540,22 +540,24 @@ Node 版对所有非 2xx 都继续尝试。Rust 首版可以先保持一致。�
 }
 ```
 
-含义：
+含义：任意主模型（例如 `gpt-5.5`）在自身 provider 尝试耗尽后，按列表顺序尝试：
 
 ```text
-gpt-4o -> claude-sonnet-4 -> gemini-2.5-pro
+primary -> gpt-4o -> claude-sonnet-4 -> gemini-2.5-pro
 ```
+
+若主模型本身也在列表中，则跳过同名项，避免重复尝试。
 
 ### 9.2 函数
 
 ```rust
-pub fn fallback_chain(model: &str, fallback_models: &[String]) -> Result<Vec<String>, ProxyError>;
+pub fn fallback_chain(model: &str, config: &Config) -> Result<Vec<String>, ProxyError>;
 ```
 
 规则：
 
-- 如果 model 不在数组中，无 fallback。
-- 如果 model 是最后一个，无 fallback。
+- 返回全局 `fallback_models`（按配置顺序），排除与主模型相同的项。
+- 先尝试请求模型本身，再尝试 `model_aliases[model]` 中的目标（可多个），最后尝试全局 `fallback_models`；全程去重。
 - 如果配置出现重复，启动时配置校验失败。
 
 ## 10. HTTP Handler 设计

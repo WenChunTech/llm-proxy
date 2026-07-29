@@ -17,7 +17,7 @@ use crate::{
         },
         types::{AttemptTarget, ProviderType},
     },
-    retry::{backoff_delay_ms, fallback_chain},
+    retry::{backoff_delay_ms, models_to_try},
     state::{AppSnapshot, AppState, AuthCursorKey, ProviderCursor},
 };
 
@@ -50,41 +50,42 @@ pub async fn execute(
     request: ExecuteRequest,
 ) -> Result<ExecuteResult, ProxyError> {
     let request = Arc::new(request);
-    let resolved_model = snapshot.config.resolve_model_alias(&request.model);
-    if resolved_model != request.model {
-        tracing::info!(
-            requested_model = %request.model,
-            resolved_model = %resolved_model,
-            "resolved model alias"
-        );
-    }
-    let mut models_to_try = vec![resolved_model.clone()];
-    models_to_try.extend(
-        fallback_chain(&resolved_model, &snapshot.config)?
-            .into_iter()
-            .map(|model| snapshot.config.resolve_model_alias(&model)),
-    );
+    let models = models_to_try(&request.model, &snapshot.config)?;
 
-    if !models_to_try
+    if !models
         .iter()
         .any(|model| snapshot.registry.has_any_provider_for_model(model))
     {
         return Err(ProxyError::ModelNotConfigured {
             model: request.model.clone(),
-            attempted: models_to_try,
+            attempted: models,
         });
     }
 
     let mut last_result: Option<ExecuteResult> = None;
     let mut last_error: Option<ProxyError> = None;
 
-    for (model_index, model) in models_to_try.iter().enumerate() {
+    for (model_index, model) in models.iter().enumerate() {
         if model_index > 0 {
-            tracing::info!(
-                previous_model = %models_to_try[model_index - 1],
-                fallback_model = %model,
-                "trying fallback model"
-            );
+            let previous = &models[model_index - 1];
+            let is_alias_target = snapshot
+                .config
+                .alias_targets_for(&request.model)
+                .iter()
+                .any(|target| target == model);
+            if is_alias_target {
+                tracing::info!(
+                    previous_model = %previous,
+                    alias_model = %model,
+                    "trying model alias target"
+                );
+            } else {
+                tracing::info!(
+                    previous_model = %previous,
+                    fallback_model = %model,
+                    "trying fallback model"
+                );
+            }
         }
 
         // Each model gets an independent attempt budget so fallback models are not
@@ -114,14 +115,13 @@ pub async fn execute_image(
     request: ExecuteImageRequest,
 ) -> Result<ExecuteResult, ProxyError> {
     let request = Arc::new(request);
-    let resolved_model = snapshot.config.resolve_model_alias(&request.model);
-    let mut targets = snapshot.registry.attempt_targets(&resolved_model);
+    let mut targets = snapshot.registry.attempt_targets(&request.model);
     targets.retain(|target| image_provider_config(target).is_some());
 
     if targets.is_empty() {
         return Err(ProxyError::ModelNotConfigured {
             model: request.model.clone(),
-            attempted: vec![resolved_model],
+            attempted: vec![request.model.clone()],
         });
     }
 

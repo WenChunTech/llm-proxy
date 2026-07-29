@@ -27,7 +27,7 @@ export function RoutingView({
   allModels: string[]
   configuredModels: string[]
   modelsByProviderKind: Record<ProviderKind, string[]>
-  modelAliases: Record<string, string>
+  modelAliases: Record<string, string[]>
   providers: Provider[]
   onMove: (index: number, action: ListMoveAction) => void
   onReorder: (sourceIndex: number, targetIndex: number) => void
@@ -38,8 +38,8 @@ export function RoutingView({
   onAddFallback: () => void
   onUpdateModelAliases: (
     aliases:
-      | Record<string, string>
-      | ((current: Record<string, string>) => Record<string, string>),
+      | Record<string, string[]>
+      | ((current: Record<string, string[]>) => Record<string, string[]>),
   ) => void
 }) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
@@ -48,19 +48,25 @@ export function RoutingView({
   const [aliasTarget, setAliasTarget] = useState('')
   const configuredModelOptions = configuredModels.map((model) => ({ value: model, label: model }))
   const aliasSourceOptions = [
-    { value: '', label: '选择别名模型（请求名）' },
+    { value: '', label: '选择主模型（请求名）' },
     ...configuredModelOptions,
   ]
+  const existingTargets = modelAliases[aliasSource] ?? []
   const aliasTargetOptions = [
-    { value: '', label: '选择原模型（实际路由）' },
-    ...configuredModelOptions,
+    { value: '', label: '选择失败后备用模型' },
+    ...configuredModelOptions.filter(
+      (option) => option.value !== aliasSource && !existingTargets.includes(option.value),
+    ),
   ]
-  const aliasRows = Object.entries(modelAliases).sort(([a], [b]) => a.localeCompare(b))
+  const aliasRows = Object.entries(modelAliases)
+    .map(([source, targets]) => [source, targets] as const)
+    .sort(([a], [b]) => a.localeCompare(b))
+  const aliasTargetCount = aliasRows.reduce((count, [, targets]) => count + targets.length, 0)
   const canAddAlias =
     Boolean(aliasSource) &&
     Boolean(aliasTarget) &&
     aliasSource !== aliasTarget &&
-    !modelAliases[aliasSource] &&
+    !existingTargets.includes(aliasTarget) &&
     configuredModels.length >= 2
   const selectableModelGroups = defaultPriority
     .map((kind) => ({
@@ -70,37 +76,68 @@ export function RoutingView({
     .filter((group) => group.models.length)
 
   function addAlias() {
-    const alias = aliasSource.trim()
+    const source = aliasSource.trim()
     const target = aliasTarget.trim()
-    if (!alias || !target || alias === target || modelAliases[alias]) return
+    if (!source || !target || source === target) return
     let added = false
     onUpdateModelAliases((current) => {
-      if (current[alias]) return current
+      const existing = current[source] ?? []
+      if (existing.includes(target)) return current
       added = true
-      return { ...current, [alias]: target }
+      return { ...current, [source]: [...existing, target] }
     })
     if (added) {
-      setAliasSource('')
       setAliasTarget('')
     }
   }
 
-  function updateAliasRow(previousAlias: string, nextAlias: string, target: string) {
-    if (!nextAlias || !target || nextAlias === target) return
+  function updateAliasSource(previousSource: string, nextSource: string) {
+    const trimmed = nextSource.trim()
+    if (!trimmed || trimmed === previousSource) return
     onUpdateModelAliases((current) => {
+      const targets = current[previousSource]
+      if (!targets?.length) return current
+      if (trimmed === previousSource) return current
       const nextAliases = { ...current }
-      if (previousAlias !== nextAlias) {
-        delete nextAliases[previousAlias]
+      delete nextAliases[previousSource]
+      const merged = [...(nextAliases[trimmed] ?? [])]
+      for (const target of targets) {
+        if (target !== trimmed && !merged.includes(target)) merged.push(target)
       }
-      nextAliases[nextAlias] = target
+      if (!merged.length) {
+        delete nextAliases[trimmed]
+      } else {
+        nextAliases[trimmed] = merged
+      }
       return nextAliases
     })
   }
 
-  function removeAlias(alias: string) {
+  function addAliasTarget(source: string, target: string) {
+    const trimmed = target.trim()
+    if (!source || !trimmed || source === trimmed) return
+    onUpdateModelAliases((current) => {
+      const existing = current[source] ?? []
+      if (existing.includes(trimmed)) return current
+      return { ...current, [source]: [...existing, trimmed] }
+    })
+  }
+
+  function removeAliasTarget(source: string, target: string) {
+    onUpdateModelAliases((current) => {
+      const existing = current[source] ?? []
+      const nextTargets = existing.filter((item) => item !== target)
+      const nextAliases = { ...current }
+      if (!nextTargets.length) delete nextAliases[source]
+      else nextAliases[source] = nextTargets
+      return nextAliases
+    })
+  }
+
+  function removeAlias(source: string) {
     onUpdateModelAliases((current) => {
       const nextAliases = { ...current }
-      delete nextAliases[alias]
+      delete nextAliases[source]
       return nextAliases
     })
   }
@@ -166,10 +203,10 @@ export function RoutingView({
         </section>
         <section className="panel fallback-panel">
           <div className="panel-heading">
-            <div><span className="eyebrow">FALLBACK MODELS</span><h3>备用模型链</h3></div>
+            <div><span className="eyebrow">GLOBAL FALLBACKS</span><h3>全局备用模型</h3></div>
             <button className="button button-secondary fallback-add-button" type="button" onClick={onAddFallback}><Icon name="plus" size={16} />添加模型</button>
           </div>
-          <p className="panel-description">主模型不可用时，按照以下顺序自动切换。</p>
+          <p className="panel-description">任意主模型全部失败后，按以下顺序全局切换备用模型；列表中的主模型自身会被跳过。</p>
           <div className="fallback-list">
             {fallbacks.map((model, index) => (
               <div
@@ -202,12 +239,12 @@ export function RoutingView({
                   <button className="icon-button subtle" type="button" title="上移" disabled={index === 0} onClick={() => onMoveFallback(index, -1)}><Icon name="arrowUp" size={15} /></button>
                   <button className="icon-button subtle" type="button" title="下移" disabled={index === fallbacks.length - 1} onClick={() => onMoveFallback(index, 1)}><Icon name="arrowDown" size={15} /></button>
                   <button className="icon-button subtle" type="button" title="置底" disabled={index === fallbacks.length - 1} onClick={() => onMoveFallback(index, 'bottom')}><Icon name="toBottom" size={15} /></button>
-                  <button className="icon-button subtle danger-button" type="button" title="移除备用模型" onClick={() => onRemoveFallback(model)}><Icon name="trash" size={15} /></button>
+                  <button className="icon-button subtle danger-button" type="button" title="移除全局备用模型" onClick={() => onRemoveFallback(model)}><Icon name="trash" size={15} /></button>
                 </div>
               </div>
             ))}
           </div>
-          {!fallbacks.length && <div className="empty-state small"><span>还没有备用模型</span></div>}
+          {!fallbacks.length && <div className="empty-state small"><span>还没有全局备用模型</span></div>}
           <div className="model-catalog">
             <span className="section-label">AVAILABLE MODELS</span>
             {selectableModelGroups.map(({ kind, models }) => (
@@ -233,75 +270,113 @@ export function RoutingView({
         </section>
         <section className="panel model-alias-panel">
           <div className="panel-heading">
-            <div><span className="eyebrow">MODEL ALIASES</span><h3>模型别名</h3></div>
-            <span className="panel-caption">{aliasRows.length} 个别名</span>
+            <div><span className="eyebrow">MODEL ALIASES</span><h3>模型别名降级</h3></div>
+            <span className="panel-caption">{aliasRows.length} 组 / {aliasTargetCount} 个目标</span>
           </div>
           <p className="panel-description">
-            原模型与别名模型都只能从当前已配置模型中选择。下方列表才是已保存的别名；上方选好后需点击「添加」。
+            先尝试请求的主模型；失败后再按顺序尝试该模型配置的多个别名目标，最后才走全局备用模型。
           </p>
           <div className="alias-add-row">
             <span className="alias-add-label">新增</span>
-            <SelectControl
-              mono
-              value={aliasSource}
-              options={configuredModelOptions.length ? aliasSourceOptions : [{ value: '', label: '暂无可选模型' }]}
-              onChange={setAliasSource}
-              disabled={!configuredModelOptions.length}
-              ariaLabel="选择别名模型（请求名）"
-            />
-            <span className="alias-arrow">→</span>
-            <SelectControl
-              mono
-              value={aliasTarget}
-              options={configuredModelOptions.length ? aliasTargetOptions : [{ value: '', label: '暂无可选模型' }]}
-              onChange={setAliasTarget}
-              disabled={!configuredModelOptions.length}
-              ariaLabel="选择原模型（实际路由）"
-            />
-            <button
-              className="icon-button accent-button"
-              type="button"
-              title={
-                !aliasSource || !aliasTarget
-                  ? '请先选择别名模型和原模型'
-                  : aliasSource === aliasTarget
-                    ? '别名不能与原模型相同'
-                    : modelAliases[aliasSource]
-                      ? '该别名已存在'
-                      : '添加别名'
-              }
-              disabled={!canAddAlias}
-              onClick={addAlias}
-            >
-              <Icon name="plus" size={16} />
-            </button>
+            <div className="alias-add-fields">
+              <SelectControl
+                mono
+                value={aliasSource}
+                options={configuredModelOptions.length ? aliasSourceOptions : [{ value: '', label: '暂无可选模型' }]}
+                onChange={setAliasSource}
+                disabled={!configuredModelOptions.length}
+                ariaLabel="选择主模型（请求名）"
+              />
+              <span className="alias-arrow" aria-hidden="true">→</span>
+              <SelectControl
+                mono
+                value={aliasTarget}
+                options={configuredModelOptions.length ? aliasTargetOptions : [{ value: '', label: '暂无可选模型' }]}
+                onChange={setAliasTarget}
+                disabled={!configuredModelOptions.length || !aliasSource}
+                ariaLabel="选择失败后备用模型"
+              />
+              <button
+                className="icon-button accent-button"
+                type="button"
+                title={
+                  !aliasSource || !aliasTarget
+                    ? '请先选择主模型和备用模型'
+                    : aliasSource === aliasTarget
+                      ? '备用模型不能与主模型相同'
+                      : existingTargets.includes(aliasTarget)
+                        ? '该备用模型已添加'
+                        : '添加别名目标'
+                }
+                disabled={!canAddAlias}
+                onClick={addAlias}
+              >
+                <Icon name="plus" size={16} />
+              </button>
+            </div>
           </div>
           <div className="alias-list">
-            {aliasRows.map(([alias, target]) => (
-              <div className="alias-row" key={alias}>
-                <SelectControl
-                  mono
-                  value={alias}
-                  options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: '暂无可选模型' }]}
-                  onChange={(nextAlias) => updateAliasRow(alias, nextAlias, target)}
-                  disabled={!configuredModelOptions.length}
-                  ariaLabel={`修改别名模型 ${alias}`}
-                />
-                <span className="alias-arrow">→</span>
-                <SelectControl
-                  mono
-                  value={target}
-                  options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: '暂无可选模型' }]}
-                  onChange={(nextTarget) => updateAliasRow(alias, alias, nextTarget)}
-                  disabled={!configuredModelOptions.length}
-                  ariaLabel={`选择 ${alias} 的原模型`}
-                />
-                <button className="icon-button subtle danger-button" type="button" title="移除别名" onClick={() => removeAlias(alias)}>
+            {aliasRows.map(([source, targets]) => (
+              <div className="alias-row" key={source}>
+                <span className="alias-field-label alias-source-label">主模型</span>
+                <div className="alias-targets-heading">
+                  <span className="alias-field-label">失败后备用</span>
+                  <span className="alias-target-count">{targets.length} 个</span>
+                </div>
+                <span className="alias-row-spacer" aria-hidden="true" />
+                <div className="alias-source-control">
+                  <SelectControl
+                    mono
+                    value={source}
+                    options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: '暂无可选模型' }]}
+                    onChange={(nextSource) => updateAliasSource(source, nextSource)}
+                    disabled={!configuredModelOptions.length}
+                    ariaLabel={`修改主模型 ${source}`}
+                  />
+                </div>
+                <span className="alias-arrow" aria-hidden="true">→</span>
+                <div className="alias-targets">
+                  {targets.map((target, index) => (
+                    <span className="alias-target-chip" key={`${source}:${target}`}>
+                      <span className="alias-target-index">{index + 1}</span>
+                      <code>{target}</code>
+                      <button
+                        className="alias-chip-remove"
+                        type="button"
+                        title={`移除 ${target}`}
+                        onClick={() => removeAliasTarget(source, target)}
+                      >
+                        <Icon name="close" size={12} />
+                      </button>
+                    </span>
+                  ))}
+                  <div className="alias-target-add">
+                    <SelectControl
+                      mono
+                      value=""
+                      options={[
+                        { value: '', label: '+ 添加目标' },
+                        ...configuredModelOptions.filter(
+                          (option) => option.value !== source && !targets.includes(option.value),
+                        ),
+                      ]}
+                      onChange={(nextTarget) => addAliasTarget(source, nextTarget)}
+                      disabled={!configuredModelOptions.length}
+                      ariaLabel={`为 ${source} 添加备用模型`}
+                    />
+                  </div>
+                </div>
+                <button
+                  className="icon-button subtle danger-button alias-row-remove"
+                  type="button"
+                  title="移除整组别名"
+                  onClick={() => removeAlias(source)}
+                >
                   <Icon name="trash" size={15} />
                 </button>
               </div>
             ))}
-            {!aliasRows.length && <div className="empty-state small"><span>还没有模型别名</span></div>}
+            {!aliasRows.length && <div className="empty-state small"><span>还没有模型别名降级</span></div>}
           </div>
         </section>
       </div>

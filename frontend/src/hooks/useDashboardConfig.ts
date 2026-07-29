@@ -39,7 +39,7 @@ type PersistInput = {
   providers?: Provider[]
   priority?: ProviderKind[]
   fallbacks?: string[]
-  modelAliases?: Record<string, string>
+  modelAliases?: Record<string, string[]>
   retry?: RetryConfig
   apiKey?: string
   logLevel?: string | null
@@ -50,7 +50,7 @@ type ConfigSnapshot = {
   providers: Provider[]
   priority: ProviderKind[]
   fallbacks: string[]
-  modelAliases: Record<string, string>
+  modelAliases: Record<string, string[]>
   retry: RetryConfig
   projectApiKey: string
   accessKey: string
@@ -62,7 +62,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
   const [providers, setProviders] = useState<Provider[]>([])
   const [priority, setPriority] = useState<ProviderKind[]>(defaultPriority)
   const [fallbacks, setFallbacks] = useState<string[]>([])
-  const [modelAliases, setModelAliases] = useState<Record<string, string>>({})
+  const [modelAliases, setModelAliases] = useState<Record<string, string[]>>({})
   const [retry, setRetry] = useState<RetryConfig>({
     maxRetries: 5,
     backoffStepMs: 5000,
@@ -446,8 +446,8 @@ export function useDashboardConfig(setToast: (message: string) => void) {
 
   function updateModelAliases(
     nextAliases:
-      | Record<string, string>
-      | ((current: Record<string, string>) => Record<string, string>),
+      | Record<string, string[]>
+      | ((current: Record<string, string[]>) => Record<string, string[]>),
   ) {
     const current = snapshotRef.current.modelAliases
     const resolved = typeof nextAliases === 'function' ? nextAliases(current) : nextAliases
