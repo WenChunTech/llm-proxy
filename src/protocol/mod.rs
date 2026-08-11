@@ -97,9 +97,7 @@ pub fn convert_request(
         (ProviderType::Responses, ProviderType::Grok) => {
             map::<openai::responses::Request, grok::Request>(body)
         }
-        (ProviderType::Claude, ProviderType::Grok) => {
-            map::<claude::Request, grok::Request>(body)
-        }
+        (ProviderType::Claude, ProviderType::Grok) => map::<claude::Request, grok::Request>(body),
         (ProviderType::Gemini, ProviderType::Grok) => {
             let req: gemini::Request = serde_json::from_value(body)?;
             let cli: gemini_cli::Request = req.into();
@@ -112,9 +110,7 @@ pub fn convert_request(
         (ProviderType::Grok, ProviderType::Responses) => {
             map::<grok::Request, openai::responses::Request>(body)
         }
-        (ProviderType::Grok, ProviderType::Claude) => {
-            map::<grok::Request, claude::Request>(body)
-        }
+        (ProviderType::Grok, ProviderType::Claude) => map::<grok::Request, claude::Request>(body),
         (ProviderType::Grok, ProviderType::Gemini) => {
             let req: grok::Request = serde_json::from_value(body)?;
             let cli: gemini_cli::Request = req.into();
@@ -196,9 +192,7 @@ pub fn convert_response(
         (ProviderType::Responses, ProviderType::Grok) => {
             map::<openai::responses::Response, grok::Response>(body)
         }
-        (ProviderType::Claude, ProviderType::Grok) => {
-            map::<claude::Response, grok::Response>(body)
-        }
+        (ProviderType::Claude, ProviderType::Grok) => map::<claude::Response, grok::Response>(body),
         (ProviderType::Gemini, ProviderType::Grok) => {
             let resp: gemini::Response = serde_json::from_value(body)?;
             let cli: gemini_cli::Response = resp.into();
@@ -211,9 +205,7 @@ pub fn convert_response(
         (ProviderType::Grok, ProviderType::Responses) => {
             map::<grok::Response, openai::responses::Response>(body)
         }
-        (ProviderType::Grok, ProviderType::Claude) => {
-            map::<grok::Response, claude::Response>(body)
-        }
+        (ProviderType::Grok, ProviderType::Claude) => map::<grok::Response, claude::Response>(body),
         (ProviderType::Grok, ProviderType::Gemini) => {
             let resp: grok::Response = serde_json::from_value(body)?;
             let cli: gemini_cli::Response = resp.into();

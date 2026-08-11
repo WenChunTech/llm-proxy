@@ -162,6 +162,7 @@ pub(super) struct AuthValidateResult {
     pub error_message: String,
     pub refreshed: bool,
     pub auth: Value,
+    pub curl: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

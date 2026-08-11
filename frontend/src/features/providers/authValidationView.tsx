@@ -1,5 +1,6 @@
 import { Icon } from '../../components/Icon'
 import { authValidationReasonLabel } from '../../lib/authValidation'
+import { copyText } from '../../lib/browser'
 import type {
   AuthProviderKind,
   AuthValidationState,
@@ -14,6 +15,7 @@ export function AuthValidationResultRow({
   onValidate,
   onDisable,
   onDelete,
+  setToast,
 }: {
   kind: AuthProviderKind
   result: AuthValidationState['payload']['results'][number]
@@ -22,6 +24,7 @@ export function AuthValidationResultRow({
   onValidate: (kind: AuthProviderKind, target: AuthValidationTarget) => void
   onDisable: (kind: AuthProviderKind, target: AuthValidationTarget, disabled: boolean) => void
   onDelete: (kind: AuthProviderKind, target: AuthValidationTarget) => void
+  setToast: (message: string) => void
 }) {
   const target = { providerIndex: result.providerIndex, authIndex: result.authIndex }
   const statusClass = validating
@@ -29,6 +32,21 @@ export function AuthValidationResultRow({
     : result.reason === 'rate_limited'
       ? 'skipped'
       : result.valid ? 'ok' : result.skipped ? 'skipped' : 'error'
+
+  async function copyAuthCurl() {
+    const curl = result.curl.trim()
+    if (!curl) {
+      setToast('当前结果没有可复制的 curl 命令')
+      return
+    }
+    try {
+      await copyText(curl)
+      setToast('curl 命令已复制')
+    } catch {
+      setToast('复制失败')
+    }
+  }
+
   return (
     <div className={`auth-validation-result-row ${validating ? 'is-validating' : ''}`}>
       <div className="auth-validation-result-main">
@@ -52,26 +70,40 @@ export function AuthValidationResultRow({
       </div>
       <div className="auth-validation-row-actions">
         <button
-          className="icon-button subtle"
+          className="icon-button"
           type="button"
-          title={validating ? '校验中' : '重新校验'}
+          title={validating ? '校验中' : '重新校验这条 Auth 配置'}
+          aria-label={validating ? '校验中' : '重新校验这条 Auth 配置'}
           disabled={disabled || validating}
           onClick={() => onValidate(kind, target)}
         >
-          <Icon name={validating ? 'pulse' : 'check'} size={15} />
+          <Icon name={validating ? 'pulse' : 'refresh'} size={16} />
         </button>
         <button
-          className="button button-secondary compact-model-sync-button"
+          className="icon-button"
           type="button"
+          title={result.disabled ? '启用 Auth' : '禁用 Auth'}
+          aria-label={result.disabled ? '启用 Auth' : '禁用 Auth'}
           disabled={validating}
           onClick={() => onDisable(kind, target, !result.disabled)}
         >
-          {result.disabled ? '启用' : '禁用'}
+          <Icon name={result.disabled ? 'check' : 'ban'} size={16} />
+        </button>
+        <button
+          className="icon-button"
+          type="button"
+          title="复制触发当前校验响应的 curl 命令"
+          aria-label="复制触发当前校验响应的 curl 命令"
+          disabled={!result.curl}
+          onClick={copyAuthCurl}
+        >
+          <Icon name="copy" size={16} />
         </button>
         <button
           className="icon-button danger-button"
           type="button"
           title="删除 auth"
+          aria-label="删除 auth"
           disabled={validating}
           onClick={() => onDelete(kind, target)}
         >

@@ -14,7 +14,9 @@ pub mod registry;
 pub mod types;
 
 pub use request_rewrite::{has_rewrite, rewrite_request, wire_protocol};
-pub use response_rewrite::{has_response_rewrite, prepare_response, response_wire_protocol, rewrite_response};
+pub use response_rewrite::{
+    has_response_rewrite, prepare_response, response_wire_protocol, rewrite_response,
+};
 
 use bytes::Bytes;
 use reqwest::header::{HeaderMap as ReqwestHeaderMap, HeaderName, HeaderValue};

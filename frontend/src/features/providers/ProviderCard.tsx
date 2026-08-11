@@ -214,7 +214,7 @@ export function ProviderCard({
         )}
         <button className={`toggle ${provider.enabled ? 'on' : ''}`} type="button" aria-label={provider.enabled ? '停用提供商' : '启用提供商'} onClick={() => onToggle(provider.id)}><span /></button>
         <button className="icon-button" type="button" title="编辑提供商" onClick={() => onEdit(provider)}><Icon name="edit" size={16} /></button>
-        <button className="icon-button" type="button" title="复制配置" onClick={() => onCopy(provider)}><Icon name="copy" size={16} /></button>
+        <button className="icon-button provider-clone-button" type="button" title="克隆配置（创建副本）" aria-label="克隆配置" onClick={() => onCopy(provider)}><Icon name="copy" size={16} /></button>
         <button className="icon-button danger-button" type="button" title="删除提供商" onClick={() => onDelete(provider.id)}><Icon name="trash" size={16} /></button>
       </div>
     </article>

@@ -27,6 +27,8 @@ const iconPaths: Record<string, string> = {
   grip: 'M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01',
   sidebar: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM9 3v18',
   terminal: 'M4 5h16v14H4zM8 9l3 3-3 3M12 15h4',
+  refresh: 'M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7L20 15',
+  ban: 'M18.36 5.64A9 9 0 1 0 5.64 18.36 9 9 0 0 0 18.36 5.64ZM7.5 7.5l9 9',
 }
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {

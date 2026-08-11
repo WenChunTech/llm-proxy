@@ -46,9 +46,6 @@ fn models_without_aliases_still_use_global_fallbacks() {
         fallback_models: vec!["a".into(), "b".into()],
         ..Default::default()
     };
-    assert_eq!(
-        models_to_try("x", &config).unwrap(),
-        vec!["x", "a", "b"]
-    );
+    assert_eq!(models_to_try("x", &config).unwrap(), vec!["x", "a", "b"]);
     assert_eq!(fallback_chain("a", &config).unwrap(), vec!["b"]);
 }

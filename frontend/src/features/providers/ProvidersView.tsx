@@ -116,6 +116,7 @@ export function ProvidersView({
   onValidateAuthResult,
   onDisableAuthResult,
   onDeleteAuthResult,
+  setToast,
 }: {
   providers: Provider[]
   query: string
@@ -151,6 +152,7 @@ export function ProvidersView({
   onValidateAuthResult: (kind: AuthProviderKind, target: AuthValidationTarget) => void
   onDisableAuthResult: (kind: AuthProviderKind, target: AuthValidationTarget, disabled: boolean) => void
   onDeleteAuthResult: (kind: AuthProviderKind, target: AuthValidationTarget) => void
+  setToast: (message: string) => void
 }) {
   const [draggedProviderId, setDraggedProviderId] = useState<string | null>(null)
   const visibleProviders = providers.filter((provider) => {
@@ -374,6 +376,7 @@ export function ProvidersView({
                 onValidate={onValidateAuthResult}
                 onDisable={onDisableAuthResult}
                 onDelete={onDeleteAuthResult}
+                setToast={setToast}
               />
             ))}
             {!authValidationResults.length && (

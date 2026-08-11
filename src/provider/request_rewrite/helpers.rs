@@ -4,9 +4,8 @@ use crate::error::ProxyError;
 
 /// Return the request body as a mutable object, or error if not an object.
 pub(super) fn require_object(body: &mut Value) -> Result<&mut Map<String, Value>, ProxyError> {
-    body.as_object_mut().ok_or_else(|| {
-        ProxyError::InvalidRequest("request body must be a JSON object".to_string())
-    })
+    body.as_object_mut()
+        .ok_or_else(|| ProxyError::InvalidRequest("request body must be a JSON object".to_string()))
 }
 
 /// Remove top-level fields from the request body.

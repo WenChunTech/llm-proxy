@@ -299,31 +299,44 @@ export function RoutingView({
             先尝试请求的主模型；失败后再按顺序尝试该模型配置的多个别名目标，最后才走全局备用模型。
           </p>
           <div className="alias-add-row">
-            <span className="alias-add-label">新增</span>
+            <div className="alias-add-header">
+              <div className="alias-add-title">
+                <span className="alias-add-label">新增别名</span>
+                <span className="alias-add-hint">主模型失败后按顺序尝试备用目标</span>
+              </div>
+            </div>
             <div className="alias-add-fields">
-              <SelectControl
-                mono
-                searchable
-                searchPlaceholder="筛选主模型…"
-                value={aliasSource}
-                options={configuredModelOptions.length ? aliasSourceOptions : [{ value: '', label: '暂无可选模型' }]}
-                onChange={setAliasSource}
-                disabled={!configuredModelOptions.length}
-                ariaLabel="选择主模型（请求名）"
-              />
-              <span className="alias-arrow" aria-hidden="true">→</span>
-              <SelectControl
-                mono
-                searchable
-                searchPlaceholder="筛选备用模型…"
-                value={aliasTarget}
-                options={configuredModelOptions.length ? aliasTargetOptions : [{ value: '', label: '暂无可选模型' }]}
-                onChange={setAliasTarget}
-                disabled={!configuredModelOptions.length || !aliasSource}
-                ariaLabel="选择失败后备用模型"
-              />
+              <label className="alias-add-field">
+                <span className="alias-field-label">主模型（请求名）</span>
+                <SelectControl
+                  mono
+                  searchable
+                  searchPlaceholder="筛选主模型…"
+                  value={aliasSource}
+                  options={configuredModelOptions.length ? aliasSourceOptions : [{ value: '', label: '暂无可选模型' }]}
+                  onChange={setAliasSource}
+                  disabled={!configuredModelOptions.length}
+                  ariaLabel="选择主模型（请求名）"
+                />
+              </label>
+              <span className="alias-add-arrow" aria-hidden="true">
+                <span className="alias-add-arrow-badge">→</span>
+              </span>
+              <label className="alias-add-field">
+                <span className="alias-field-label">失败后备用</span>
+                <SelectControl
+                  mono
+                  searchable
+                  searchPlaceholder="筛选备用模型…"
+                  value={aliasTarget}
+                  options={configuredModelOptions.length ? aliasTargetOptions : [{ value: '', label: '暂无可选模型' }]}
+                  onChange={setAliasTarget}
+                  disabled={!configuredModelOptions.length || !aliasSource}
+                  ariaLabel="选择失败后备用模型"
+                />
+              </label>
               <button
-                className="icon-button accent-button"
+                className={`button alias-add-button${canAddAlias ? ' alias-add-button-ready' : ''}`}
                 type="button"
                 title={
                   !aliasSource || !aliasTarget
@@ -337,7 +350,8 @@ export function RoutingView({
                 disabled={!canAddAlias}
                 onClick={addAlias}
               >
-                <Icon name="plus" size={16} />
+                <Icon name="plus" size={15} />
+                添加目标
               </button>
             </div>
           </div>

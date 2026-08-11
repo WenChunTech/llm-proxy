@@ -100,6 +100,7 @@ function normalizeResult(value: unknown): AuthValidationResult {
     errorMessage: String(record.errorMessage ?? record.error_message ?? ''),
     refreshed: Boolean(record.refreshed),
     auth: record.auth,
+    curl: String(record.curl ?? ''),
   }
 }
 

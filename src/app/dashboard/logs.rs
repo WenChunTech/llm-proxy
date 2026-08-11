@@ -53,7 +53,11 @@ struct DeleteDumpsRequest {
 /// Optional query `q` searches model / provider / endpoint / id / status and
 /// dump file contents (request/response bodies).
 #[handler]
-pub(in crate::app) async fn api_debug_dumps(req: &mut Request, depot: &mut Depot, res: &mut Response) {
+pub(in crate::app) async fn api_debug_dumps(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) {
     let Some(state) = state_from_depot(depot).ok() else {
         render_error(res, ProxyError::Config("missing app state".to_string()));
         return;
@@ -527,10 +531,7 @@ struct DeleteResult {
 fn delete_dump(base: &Path, id: &str) -> Result<(), ProxyError> {
     let dir = resolve_dump_dir(base, id)?;
     fs::remove_dir_all(&dir).map_err(|error| {
-        ProxyError::Config(format!(
-            "failed to delete dump {}: {error}",
-            dir.display()
-        ))
+        ProxyError::Config(format!("failed to delete dump {}: {error}", dir.display()))
     })?;
     Ok(())
 }

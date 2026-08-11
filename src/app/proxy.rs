@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use bytes::Bytes;
 use futures_util::{StreamExt, TryStreamExt, stream};
 use salvo::{
@@ -6,6 +5,7 @@ use salvo::{
     prelude::*,
 };
 use serde_json::Value;
+use std::sync::Arc;
 
 use crate::{
     error::ProxyError,
@@ -85,14 +85,14 @@ async fn handle_model_request(
     let snapshot = state.snapshot().await;
     let client_body = Arc::new(request_body);
     let stream_context = StreamContext::from_request(target, client_body.as_ref());
-    let (model, is_streaming, body) =
-        match parse_model_request(req, target, (*client_body).clone()) {
-            Ok(parsed) => parsed,
-            Err(error) => {
-                render_error(res, error);
-                return;
-            }
-        };
+    let (model, is_streaming, body) = match parse_model_request(req, target, (*client_body).clone())
+    {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            render_error(res, error);
+            return;
+        }
+    };
 
     tracing::info!(
         target = ?target,
@@ -160,7 +160,11 @@ async fn handle_image_generation(req: &mut Request, depot: &mut Depot, res: &mut
         }
     };
     let body = Arc::new(body);
-    let Some(model) = body.get("model").and_then(Value::as_str).map(str::to_string) else {
+    let Some(model) = body
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
         render_error(
             res,
             ProxyError::InvalidRequest("model is required".to_string()),
@@ -311,11 +315,10 @@ async fn write_execute_result(
                 return Ok(());
             }
 
-            let converter = state.providers.stream_converter(
-                result.provider_type,
-                target,
-                stream_context,
-            );
+            let converter =
+                state
+                    .providers
+                    .stream_converter(result.provider_type, target, stream_context);
             // converted_stream dumps raw upstream chunks; client still receives converted SSE.
             let stream = converted_stream(
                 response,

@@ -162,6 +162,7 @@ function App() {
             }
             onDisableAuthResult={authValidation.disableAuthFromValidation}
             onDeleteAuthResult={authValidation.deleteAuthFromValidation}
+            setToast={setToast}
           />
         )}
         {view === 'routing' && (

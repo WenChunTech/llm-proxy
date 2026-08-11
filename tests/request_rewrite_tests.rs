@@ -121,9 +121,7 @@ fn grok_skips_dialect_rewrite_when_endpoint_is_not_wire() {
     // rewrite, so no bare x_search is injected.
     if let Some(tools) = out.get("tools").and_then(Value::as_array) {
         assert!(
-            !tools
-                .iter()
-                .any(|tool| tool_type(tool) == Some("x_search")),
+            !tools.iter().any(|tool| tool_type(tool) == Some("x_search")),
             "cross-protocol entry must skip grok dialect rewrite: {tools:?}"
         );
     }
@@ -153,9 +151,7 @@ fn gemini_endpoint_to_grok_converts_but_skips_rewrite() {
     // entry, so x_search is not injected.
     if let Some(tools) = out.get("tools").and_then(Value::as_array) {
         assert!(
-            !tools
-                .iter()
-                .any(|tool| tool_type(tool) == Some("x_search")),
+            !tools.iter().any(|tool| tool_type(tool) == Some("x_search")),
             "gemini endpoint + grok must skip dialect rewrite: {tools:?}"
         );
     }

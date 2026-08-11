@@ -3,7 +3,10 @@ use llm_proxy::provider::types::ProviderType;
 use serde_json::{Value, json};
 
 fn assert_object(value: &Value) {
-    assert!(value.is_object(), "converted value must be an object: {value}");
+    assert!(
+        value.is_object(),
+        "converted value must be an object: {value}"
+    );
 }
 
 fn tool_type(tool: &Value) -> Option<&str> {
@@ -60,8 +63,8 @@ fn grok_request_conversions_from_core_protocols() {
 
     // Responses -> Grok
     let responses = json!({"model": "grok-4.5", "input": "hi"});
-    let out =
-        convert_request(responses, ProviderType::Responses, ProviderType::Grok).expect("resp->grok");
+    let out = convert_request(responses, ProviderType::Responses, ProviderType::Grok)
+        .expect("resp->grok");
     assert_object(&out);
 
     // Claude -> Grok
@@ -70,7 +73,8 @@ fn grok_request_conversions_from_core_protocols() {
         "max_tokens": 64,
         "messages": [{"role": "user", "content": "hi"}]
     });
-    let out = convert_request(claude, ProviderType::Claude, ProviderType::Grok).expect("claude->grok");
+    let out =
+        convert_request(claude, ProviderType::Claude, ProviderType::Grok).expect("claude->grok");
     assert_object(&out);
 
     // Gemini -> Grok (routed through gemini_cli)
@@ -78,7 +82,8 @@ fn grok_request_conversions_from_core_protocols() {
         "model": "grok-4.5",
         "contents": [{"role": "user", "parts": [{"text": "hi"}]}]
     });
-    let out = convert_request(gemini, ProviderType::Gemini, ProviderType::Grok).expect("gemini->grok");
+    let out =
+        convert_request(gemini, ProviderType::Gemini, ProviderType::Grok).expect("gemini->grok");
     assert_object(&out);
 }
 
@@ -103,8 +108,8 @@ fn responses_to_grok_accepts_shell_tool_environment() {
         ]
     });
 
-    let out =
-        convert_request(responses, ProviderType::Responses, ProviderType::Grok).expect("resp->grok");
+    let out = convert_request(responses, ProviderType::Responses, ProviderType::Grok)
+        .expect("resp->grok");
 
     assert_eq!(out["tools"][0]["type"], "shell");
     assert_eq!(out["tools"][0]["environment"]["type"], "local");
@@ -141,8 +146,8 @@ fn responses_to_grok_accepts_namespace_tools() {
         ]
     });
 
-    let out =
-        convert_request(responses, ProviderType::Responses, ProviderType::Grok).expect("resp->grok");
+    let out = convert_request(responses, ProviderType::Responses, ProviderType::Grok)
+        .expect("resp->grok");
 
     assert!(out.get("tools").is_none_or(|tools| {
         tools.as_array().is_none_or(|tools| {
@@ -161,18 +166,21 @@ fn grok_request_conversions_to_core_protocols() {
         "temperature": 0.3
     });
 
-    let chat = convert_request(grok.clone(), ProviderType::Grok, ProviderType::Chat).expect("grok->chat");
+    let chat =
+        convert_request(grok.clone(), ProviderType::Grok, ProviderType::Chat).expect("grok->chat");
     assert_eq!(chat["model"], "grok-4.5");
     assert!(chat.get("messages").is_some());
 
-    let responses =
-        convert_request(grok.clone(), ProviderType::Grok, ProviderType::Responses).expect("grok->resp");
+    let responses = convert_request(grok.clone(), ProviderType::Grok, ProviderType::Responses)
+        .expect("grok->resp");
     assert_object(&responses);
 
-    let claude = convert_request(grok.clone(), ProviderType::Grok, ProviderType::Claude).expect("grok->claude");
+    let claude = convert_request(grok.clone(), ProviderType::Grok, ProviderType::Claude)
+        .expect("grok->claude");
     assert_eq!(claude["model"], "grok-4.5");
 
-    let gemini = convert_request(grok, ProviderType::Grok, ProviderType::Gemini).expect("grok->gemini");
+    let gemini =
+        convert_request(grok, ProviderType::Grok, ProviderType::Gemini).expect("grok->gemini");
     assert_object(&gemini);
 }
 
@@ -192,24 +200,28 @@ fn grok_response_conversions_round_trip() {
         }]
     });
 
-    let chat = convert_response(grok.clone(), ProviderType::Grok, ProviderType::Chat).expect("grok->chat");
+    let chat =
+        convert_response(grok.clone(), ProviderType::Grok, ProviderType::Chat).expect("grok->chat");
     assert_eq!(chat["model"], "grok-4.5");
     assert!(chat.get("choices").is_some());
 
-    let responses =
-        convert_response(grok.clone(), ProviderType::Grok, ProviderType::Responses).expect("grok->resp");
+    let responses = convert_response(grok.clone(), ProviderType::Grok, ProviderType::Responses)
+        .expect("grok->resp");
     assert_object(&responses);
 
-    let claude = convert_response(grok.clone(), ProviderType::Grok, ProviderType::Claude).expect("grok->claude");
+    let claude = convert_response(grok.clone(), ProviderType::Grok, ProviderType::Claude)
+        .expect("grok->claude");
     assert_object(&claude);
 
-    let gemini = convert_response(grok, ProviderType::Grok, ProviderType::Gemini).expect("grok->gemini");
+    let gemini =
+        convert_response(grok, ProviderType::Grok, ProviderType::Gemini).expect("grok->gemini");
     assert_object(&gemini);
 }
 
 #[test]
 fn grok_identity_conversion_is_passthrough() {
     let body = json!({"model": "grok-4.5", "input": "hi"});
-    let out = convert_request(body.clone(), ProviderType::Grok, ProviderType::Grok).expect("identity");
+    let out =
+        convert_request(body.clone(), ProviderType::Grok, ProviderType::Grok).expect("identity");
     assert_eq!(out, body);
 }

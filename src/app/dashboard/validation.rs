@@ -60,6 +60,7 @@ struct AuthValidationProbe {
     reason: String,
     status_code: u16,
     error_message: String,
+    curl: String,
 }
 
 impl AuthValidationProbe {
@@ -69,6 +70,7 @@ impl AuthValidationProbe {
             reason: reason.to_string(),
             status_code: 0,
             error_message: message.into(),
+            curl: String::new(),
         }
     }
 }
@@ -211,6 +213,7 @@ pub(super) async fn validate_auths_with_progress(
                         error_message: "auth JSON is empty".to_string(),
                         refreshed: false,
                         auth: Value::Null,
+                        curl: String::new(),
                     }
                 } else {
                     let Some(provider) = providers.get(task.provider_index) else {
@@ -228,6 +231,7 @@ pub(super) async fn validate_auths_with_progress(
                             error_message: "provider is missing".to_string(),
                             refreshed: false,
                             auth: Value::Null,
+                            curl: String::new(),
                         };
                     };
                     let mut auth = task.auth;
@@ -257,6 +261,7 @@ pub(super) async fn validate_auths_with_progress(
                         error_message: probe.error_message,
                         refreshed,
                         auth,
+                        curl: probe.curl,
                     }
                 };
 
@@ -445,52 +450,69 @@ async fn validate_single_auth(
         );
     }
 
-    let mut refreshed = false;
-    if oauth::should_refresh_value(provider_type, auth) {
-        match refresh_validation_auth(client, provider_type, auth).await {
-            Ok(()) => refreshed = true,
-            Err(message) => {
-                return (
-                    AuthValidationProbe::skipped("refresh_failed", message),
-                    refreshed,
-                );
+    if let Some(token) = auth_string(auth, "access_token") {
+        let should_refresh = oauth::should_refresh_value(provider_type, auth);
+        let probe =
+            probe_validation_auth(client, provider_type, provider, auth, &token, model).await;
+        let should_try_refresh = auth_string(auth, "refresh_token").is_some()
+            && (probe.reason == "invalid_auth" || should_refresh);
+        if should_try_refresh {
+            match refresh_validation_auth(client, provider_type, auth).await {
+                Ok(()) => return (probe, true),
+                Err(error) => {
+                    tracing::warn!(
+                        provider = ?provider_type,
+                        error = %error,
+                        "auth validation token refresh failed after auth probe"
+                    );
+                }
             }
         }
+        return (probe, false);
     }
 
-    let Some(token) = auth_string(auth, "access_token") else {
+    if auth_string(auth, "refresh_token").is_none() {
         return (
             AuthValidationProbe::skipped(
                 "missing_access_token",
                 "access_token is missing and refresh_token is not configured",
             ),
+            false,
+        );
+    }
+
+    let refreshed = match refresh_validation_auth(client, provider_type, auth).await {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(
+                provider = ?provider_type,
+                error = %error,
+                "auth validation token refresh failed before auth probe"
+            );
+            return (
+                AuthValidationProbe::skipped(
+                    "missing_access_token",
+                    "access_token is missing and refresh_token could not refresh an access token",
+                ),
+                false,
+            );
+        }
+    };
+
+    let Some(token) = auth_string(auth, "access_token") else {
+        return (
+            AuthValidationProbe::skipped(
+                "missing_access_token",
+                "refresh_token refresh did not return an access_token",
+            ),
             refreshed,
         );
     };
 
-    let probe = probe_validation_auth(client, provider_type, provider, auth, &token, model).await;
-    if probe.reason == "invalid_auth" && auth_string(auth, "refresh_token").is_some() && !refreshed
-    {
-        match refresh_validation_auth(client, provider_type, auth).await {
-            Ok(()) => {
-                refreshed = true;
-                if let Some(token) = auth_string(auth, "access_token") {
-                    return (
-                        probe_validation_auth(client, provider_type, provider, auth, &token, model)
-                            .await,
-                        refreshed,
-                    );
-                }
-            }
-            Err(message) => {
-                return (
-                    AuthValidationProbe::skipped("refresh_failed", message),
-                    refreshed,
-                );
-            }
-        }
-    }
-    (probe, refreshed)
+    (
+        probe_validation_auth(client, provider_type, provider, auth, &token, model).await,
+        refreshed,
+    )
 }
 
 async fn probe_validation_auth(
@@ -513,16 +535,28 @@ async fn probe_validation_auth(
             return AuthValidationProbe::skipped("invalid_base_url", error.to_string());
         }
     };
-    let body = json!({
-        "model": model,
-        "input": [{"content": "hello", "role": "user"}],
-        "instructions": "",
-        "store": false,
-        "stream": true,
-    });
+    let prompt = "hello";
+    let body = match provider_type {
+        ProviderType::Codex => json!({
+            "model": model,
+            "input": prompt,
+            "stream": true,
+            "max_output_tokens": 16,
+            "store": false,
+            "instructions": "",
+        }),
+        ProviderType::Grok => json!({
+            "model": model,
+            "input": prompt,
+            "stream": true,
+            "max_output_tokens": 16,
+        }),
+        _ => unreachable!("auth validation is only supported for Codex and Grok"),
+    };
     // Match formal Codex/Grok proxy header merge order:
     // fixed protocol headers -> auth.headers -> provider.headers.
     let headers = validation_request_headers(provider_type, token, auth, &provider.headers);
+    let curl = validation_request_curl(&endpoint, &headers, &body);
     let mut builder = client
         .post(&endpoint)
         .timeout(Duration::from_secs(30))
@@ -542,11 +576,12 @@ async fn probe_validation_auth(
                     reason: "ok".to_string(),
                     status_code,
                     error_message: String::new(),
+                    curl,
                 };
             }
 
             let body = response.text().await.unwrap_or_default();
-            classify_validation_response(provider_type, status_code, &body)
+            classify_validation_response(provider_type, status_code, &body, curl)
         }
         Err(error) => {
             let status_code = error.status().map(|status| status.as_u16()).unwrap_or(0);
@@ -566,6 +601,7 @@ async fn probe_validation_auth(
                 reason: "network_error".to_string(),
                 status_code,
                 error_message: error.to_string(),
+                curl,
             }
         }
     }
@@ -575,6 +611,7 @@ fn classify_validation_response(
     provider_type: ProviderType,
     status_code: u16,
     body: &str,
+    curl: String,
 ) -> AuthValidationProbe {
     let error_type = serde_json::from_str::<Value>(body)
         .ok()
@@ -613,6 +650,7 @@ fn classify_validation_response(
             reason: "invalid_auth".to_string(),
             status_code,
             error_message: validation_error_message(error_type.as_ref(), body),
+            curl,
         };
     }
 
@@ -636,6 +674,7 @@ fn classify_validation_response(
         reason: reason.to_string(),
         status_code,
         error_message,
+        curl,
     }
 }
 
@@ -646,6 +685,25 @@ fn validation_error_message(error_type: Option<&(String, String, String)>, body:
         return message.clone();
     }
     body.chars().take(500).collect()
+}
+
+fn validation_request_curl(endpoint: &str, headers: &HeaderMap, body: &Value) -> String {
+    let header_args = headers
+        .iter()
+        .filter(|(_, value)| !value.trim().is_empty())
+        .map(|(name, value)| format!("-H {}", shell_quote(&format!("{name}: {value}"))))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "curl -sS -X POST {} {} --data-raw {}",
+        shell_quote(endpoint),
+        header_args,
+        shell_quote(&body.to_string()),
+    )
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 /// Build headers for Codex/Grok auth validation using the same merge rules as
@@ -727,14 +785,10 @@ async fn refresh_validation_auth(
     client: &reqwest::Client,
     provider_type: ProviderType,
     auth: &mut Value,
-) -> Result<(), String> {
+) -> Result<(), ProxyError> {
     match provider_type {
-        ProviderType::Codex => oauth::refresh_codex_auth_value(client, auth)
-            .await
-            .map_err(|error| error.to_string()),
-        ProviderType::Grok => oauth::refresh_grok_auth_value(client, auth)
-            .await
-            .map_err(|error| error.to_string()),
+        ProviderType::Codex => oauth::refresh_codex_auth_value(client, auth).await,
+        ProviderType::Grok => oauth::refresh_grok_auth_value(client, auth).await,
         _ => Ok(()),
     }
 }

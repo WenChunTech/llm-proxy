@@ -53,6 +53,7 @@ export function LogsView({
   const [deleting, setDeleting] = useState(false)
   const [listError, setListError] = useState('')
   const [actionHint, setActionHint] = useState('')
+  const [pendingDelete, setPendingDelete] = useState<{ key: string; message: string } | null>(null)
   const [liveChunks, setLiveChunks] = useState<Record<string, string>>({})
   const [processFilter, setProcessFilter] = useState('')
   const [autoScroll, setAutoScroll] = useState(true)
@@ -246,13 +247,19 @@ export function LogsView({
       if (!uniqueIds.length || deleting) return
 
       const labels = {
-        one: `确定删除该转储会话吗？\n${uniqueIds[0]}`,
-        selected: `确定删除选中的 ${uniqueIds.length} 个转储会话吗？`,
-        filtered: `确定删除当前筛选结果中的 ${uniqueIds.length} 个转储会话吗？`,
+        one: `再次点击删除该转储会话：${uniqueIds[0]}`,
+        selected: `再次点击删除选中的 ${uniqueIds.length} 个转储会话`,
+        filtered: `再次点击删除当前筛选结果中的 ${uniqueIds.length} 个转储会话`,
       }
-      if (!window.confirm(labels[mode])) return
+      const deleteKey = `${mode}:${uniqueIds.join(',')}`
+      if (pendingDelete?.key !== deleteKey) {
+        setPendingDelete({ key: deleteKey, message: labels[mode] })
+        showActionHint(labels[mode])
+        return
+      }
 
       setDeleting(true)
+      setPendingDelete(null)
       setListError('')
       try {
         const response =
@@ -287,7 +294,7 @@ export function LogsView({
         setDeleting(false)
       }
     },
-    [accessKey, deleting, removeLocalDumps, scheduleReloadList, showActionHint],
+    [accessKey, deleting, pendingDelete?.key, removeLocalDumps, scheduleReloadList, showActionHint],
   )
 
   const { connection, processLines, setProcessLines } = useLogsSocket({

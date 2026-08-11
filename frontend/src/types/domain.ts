@@ -105,6 +105,7 @@ export type AuthValidationResult = {
   errorMessage: string
   refreshed: boolean
   auth: unknown
+  curl: string
 }
 
 export type AuthValidationPayload = {

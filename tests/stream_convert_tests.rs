@@ -5,7 +5,7 @@ use llm_proxy::{
         sse::SseEvent,
     },
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[test]
 fn grok_stream_output_item_added_without_content_converts_to_responses() {

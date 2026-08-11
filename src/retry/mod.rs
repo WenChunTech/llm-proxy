@@ -37,10 +37,7 @@ pub fn models_to_try(model: &str, config: &Config) -> Result<Vec<String>, ProxyE
 
 /// Global fallback models only (excludes the primary model).
 pub fn fallback_chain(model: &str, config: &Config) -> Result<Vec<String>, ProxyError> {
-    Ok(models_to_try(model, config)?
-        .into_iter()
-        .skip(1)
-        .collect())
+    Ok(models_to_try(model, config)?.into_iter().skip(1).collect())
 }
 
 pub fn backoff_delay_ms(attempt: usize, config: &Config) -> u64 {
