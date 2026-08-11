@@ -1085,9 +1085,20 @@ code {
 
 .auth-validation-result-detail .auth-validation-error {
   flex-basis: 100%;
-  padding: 6px 8px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--field-ink);
   font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  background: var(--field-bg);
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .provider-group-list {
@@ -3308,6 +3319,13 @@ code {
 :root[data-theme='dark'] .auth-validation-result-detail code {
   color: var(--field-ink);
   background: var(--field-bg);
+}
+
+/* Raw upstream body: match dark panel/field chrome (not a bright white card). */
+:root[data-theme='dark'] .auth-validation-result-detail .auth-validation-error {
+  color: var(--console-ink);
+  border-color: var(--line);
+  background: var(--soft-panel);
 }
 
 :root[data-theme='dark'] .header-row code,

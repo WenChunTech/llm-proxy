@@ -15,6 +15,7 @@ pub(super) use logs::{
 };
 pub use types::DashboardAuthProvider;
 pub use validation::{
+    build_validation_probe_request, classify_auth_validation_response,
     resolve_auth_validation_concurrency, validation_auth_base_url, validation_request_headers,
 };
 pub(super) use validation_ws::{api_validate_codex_auths_ws, api_validate_grok_auths_ws};

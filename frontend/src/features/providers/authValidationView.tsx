@@ -66,7 +66,11 @@ export function AuthValidationResultRow({
         {result.reason === 'rate_limited' && result.disabled && <span>已自动禁用</span>}
         {result.disabled && <span>已禁用</span>}
         {validating && <span className="auth-validation-running">校验中…</span>}
-        {result.errorMessage && !validating && <span className="auth-validation-error">{result.errorMessage}</span>}
+        {result.errorMessage && !validating && (
+          <pre className="auth-validation-error" title="上游原始响应（与 curl 输出一致）">
+            {result.errorMessage}
+          </pre>
+        )}
       </div>
       <div className="auth-validation-row-actions">
         <button

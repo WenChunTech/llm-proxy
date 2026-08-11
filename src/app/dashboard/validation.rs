@@ -458,7 +458,22 @@ async fn validate_single_auth(
             && (probe.reason == "invalid_auth" || should_refresh);
         if should_try_refresh {
             match refresh_validation_auth(client, provider_type, auth).await {
-                Ok(()) => return (probe, true),
+                Ok(()) => {
+                    let Some(token) = auth_string(auth, "access_token") else {
+                        return (
+                            AuthValidationProbe::skipped(
+                                "missing_access_token",
+                                "refresh did not return access token",
+                            ),
+                            true,
+                        );
+                    };
+                    // Re-probe with the refreshed token so the result matches real curl.
+                    let new_probe =
+                        probe_validation_auth(client, provider_type, provider, auth, &token, model)
+                            .await;
+                    return (new_probe, true);
+                }
                 Err(error) => {
                     tracing::warn!(
                         provider = ?provider_type,
@@ -553,17 +568,15 @@ async fn probe_validation_auth(
         }),
         _ => unreachable!("auth validation is only supported for Codex and Grok"),
     };
-    // Match formal Codex/Grok proxy header merge order:
-    // fixed protocol headers -> auth.headers -> provider.headers.
+    // Match formal Codex/Grok proxy construction:
+    // fixed protocol headers -> auth.headers -> provider.headers, then .json().
+    // Important: set headers *before* `.json()`. reqwest's `.json()` only inserts
+    // Content-Type when missing (`or_insert`). Applying headers after `.json()` via
+    // `.header()` *appends* a second Content-Type; xAI/Codex reject dual
+    // Content-Type with HTTP 415, while the generated single-header curl succeeds.
     let headers = validation_request_headers(provider_type, token, auth, &provider.headers);
     let curl = validation_request_curl(&endpoint, &headers, &body);
-    let mut builder = client
-        .post(&endpoint)
-        .timeout(Duration::from_secs(30))
-        .json(&body);
-    for (name, value) in &headers {
-        builder = builder.header(name.as_str(), value.as_str());
-    }
+    let builder = build_validation_probe_request(client, &endpoint, &headers, &body);
 
     match builder.send().await {
         Ok(response) => {
@@ -613,45 +626,34 @@ fn classify_validation_response(
     body: &str,
     curl: String,
 ) -> AuthValidationProbe {
-    let error_type = serde_json::from_str::<Value>(body)
-        .ok()
-        .and_then(|value| value.get("error").cloned())
-        .map(|error| {
-            let error_type = error
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let error_code = error
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let message = error
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            (error_type, error_code, message)
-        });
+    let (valid, reason, error_message) =
+        classify_auth_validation_response(provider_type, status_code, body);
+    AuthValidationProbe {
+        valid,
+        reason,
+        status_code,
+        error_message,
+        curl,
+    }
+}
+
+/// Classify an upstream validation response into valid/reason/message.
+///
+/// `error_message` is the **raw upstream body** (unchanged) so the dashboard can
+/// show exactly what curl would print. Classification still parses the body
+/// internally; display must not use extracted/summarized fields.
+/// Exposed for unit tests so Codex/Grok auth failure shapes stay covered.
+pub fn classify_auth_validation_response(
+    provider_type: ProviderType,
+    status_code: u16,
+    body: &str,
+) -> (bool, String, String) {
+    let error_details = extract_validation_error_details(body);
     let lower_body = body.to_lowercase();
-    let invalid_auth = status_code == 401
-        || error_type
-            .as_ref()
-            .is_some_and(|(error_type, error_code, _)| {
-                error_type == "authentication_error" || error_code == "invalid_api_key"
-            })
-        || lower_body.contains("invalid or expired token")
-        || (provider_type == ProviderType::Grok
-            && (lower_body.contains("invalid_api_key") || lower_body.contains("unauthorized")));
-    if invalid_auth {
-        return AuthValidationProbe {
-            valid: false,
-            reason: "invalid_auth".to_string(),
-            status_code,
-            error_message: validation_error_message(error_type.as_ref(), body),
-            curl,
-        };
+    // Always surface the upstream body verbatim for non-2xx probes.
+    let raw_body = body.to_string();
+    if is_invalid_auth_response(provider_type, status_code, &error_details, &lower_body) {
+        return (false, "invalid_auth".to_string(), raw_body);
     }
 
     let (valid, reason) = match status_code {
@@ -663,28 +665,125 @@ fn classify_validation_response(
         500..=599 => (true, "server_error"),
         _ => (false, "unexpected"),
     };
-    // Only non-2xx responses include upstream body/error details.
     let error_message = if (200..300).contains(&status_code) {
         String::new()
     } else {
-        validation_error_message(error_type.as_ref(), body)
+        raw_body
     };
-    AuthValidationProbe {
-        valid,
-        reason: reason.to_string(),
-        status_code,
-        error_message,
-        curl,
-    }
+    (valid, reason.to_string(), error_message)
 }
 
-fn validation_error_message(error_type: Option<&(String, String, String)>, body: &str) -> String {
-    if let Some((_, _, message)) = error_type
-        && !message.trim().is_empty()
-    {
-        return message.clone();
+/// Build the validation probe RequestBuilder the same way as production so tests
+/// can assert a single Content-Type (xAI rejects dual Content-Type with 415).
+pub fn build_validation_probe_request(
+    client: &reqwest::Client,
+    endpoint: &str,
+    headers: &HeaderMap,
+    body: &Value,
+) -> reqwest::RequestBuilder {
+    let mut builder = client.post(endpoint).timeout(Duration::from_secs(30));
+    for (name, value) in headers {
+        builder = builder.header(name.as_str(), value.as_str());
     }
-    body.chars().take(500).collect()
+    // Headers first, then `.json()`: reqwest only inserts Content-Type when absent.
+    builder.json(body)
+}
+
+/// Parse upstream error payloads for both nested OpenAI-style objects and flat
+/// xAI-style `{"code":"...","error":"..."}` responses.
+fn extract_validation_error_details(body: &str) -> Option<(String, String, String)> {
+    let value = serde_json::from_str::<Value>(body).ok()?;
+
+    if let Some(error) = value.get("error").filter(|error| error.is_object()) {
+        let error_type = error
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let error_code = error
+            .get("code")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let message = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        return Some((error_type, error_code, message));
+    }
+
+    // Flat shape used by xAI OAuth failures:
+    // {"code":"unauthenticated:bad-credentials","error":"The OAuth2 access token could not be validated."}
+    let error_code = value
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let message = value
+        .get("error")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("message").and_then(Value::as_str))
+        .unwrap_or_default()
+        .to_string();
+    if error_code.is_empty() && message.is_empty() {
+        return None;
+    }
+    Some((String::new(), error_code, message))
+}
+
+fn is_invalid_auth_response(
+    provider_type: ProviderType,
+    status_code: u16,
+    error_details: &Option<(String, String, String)>,
+    lower_body: &str,
+) -> bool {
+    if status_code == 401 {
+        return true;
+    }
+
+    if error_details
+        .as_ref()
+        .is_some_and(|(error_type, error_code, message)| {
+            auth_failure_token(error_type)
+                || auth_failure_token(error_code)
+                || auth_failure_token(message)
+        })
+    {
+        return true;
+    }
+
+    if auth_failure_token(lower_body) {
+        return true;
+    }
+
+    // 403 from OAuth gateways is often an auth failure rather than a resource ACL.
+    if status_code == 403
+        && (provider_type == ProviderType::Grok || provider_type == ProviderType::Codex)
+        && (lower_body.contains("unauthenticated")
+            || lower_body.contains("token")
+            || lower_body.contains("credential")
+            || lower_body.contains("oauth"))
+    {
+        return true;
+    }
+
+    false
+}
+
+fn auth_failure_token(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.contains("authentication_error")
+        || lower.contains("invalid_api_key")
+        || lower.contains("invalid or expired token")
+        || lower.contains("access token could not be validated")
+        || lower.contains("unauthenticated")
+        || lower.contains("bad-credentials")
+        || lower.contains("bad_credentials")
+        || lower.contains("unauthorized")
+        || lower.contains("invalid_token")
+        || lower.contains("token_expired")
+        || lower.contains("expired_token")
 }
 
 fn validation_request_curl(endpoint: &str, headers: &HeaderMap, body: &Value) -> String {
