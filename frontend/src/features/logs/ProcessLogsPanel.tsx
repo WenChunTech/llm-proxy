@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
 import { Icon } from '../../components/Icon'
 import { escapeHtml, highlightKeywordInHtml } from './highlight'
+import type { ProcessLogLine } from './types'
 import { scrollNode } from './format'
 
 export type ProcessLogsPanelHandle = {
@@ -10,7 +11,7 @@ export type ProcessLogsPanelHandle = {
 export const ProcessLogsPanel = forwardRef<
   ProcessLogsPanelHandle,
   {
-    lines: string[]
+    lines: ProcessLogLine[]
     filter: string
     autoScroll: boolean
     onAutoScrollChange?: (value: boolean) => void
@@ -20,7 +21,7 @@ export const ProcessLogsPanel = forwardRef<
   const visibleLines = useMemo(() => {
     const query = filter.trim().toLowerCase()
     if (!query) return lines
-    return lines.filter((line) => line.toLowerCase().includes(query))
+    return lines.filter((line) => line.text.toLowerCase().includes(query))
   }, [filter, lines])
 
   useImperativeHandle(ref, () => ({
@@ -46,16 +47,16 @@ export const ProcessLogsPanel = forwardRef<
       <div className="logs-scroll-shell">
         <pre ref={processRef} className="logs-console" aria-live="polite">
           {visibleLines.length ? (
-            visibleLines.map((line, index) => (
-              <div className="logs-line" key={`${index}-${line.slice(0, 32)}`}>
+            visibleLines.map((line) => (
+              <div className="logs-line" key={line.id}>
                 {filter.trim() ? (
                   <span
                     dangerouslySetInnerHTML={{
-                      __html: highlightKeywordInHtml(escapeHtml(line), filter),
+                      __html: highlightKeywordInHtml(escapeHtml(line.text), filter),
                     }}
                   />
                 ) : (
-                  line
+                  line.text
                 )}
               </div>
             ))

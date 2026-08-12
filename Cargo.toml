@@ -6,8 +6,8 @@ edition = "2024"
 [dependencies]
 base64 = "0.22.1"
 bytes = "1.12.1"
-converter = { git = "ssh://git@github.com/WenChunTech/converter.git", branch = "master" }
 # converter = { git = "ssh://git@github.com/WenChunTech/converter.git", branch = "master" }
+converter = { path = "./converter" }
 futures-util = "0.3.32"
 mime_guess = "2.0.5"
 reqwest = { version = "0.13.4", features = ["json", "stream", "rustls", "form"] }

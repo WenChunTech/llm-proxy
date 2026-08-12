@@ -378,14 +378,14 @@ fn converted_stream(
             upstream,
             SseParser::default(),
             converter,
-            Vec::<Bytes>::new(),
+            std::collections::VecDeque::<Bytes>::new(),
             false,
         ),
         move |(mut upstream, mut parser, mut converter, mut pending, mut finished)| {
             let model = model.clone();
             let dump = dump.clone();
             async move {
-                if let Some(bytes) = pending.pop() {
+                if let Some(bytes) = pending.pop_front() {
                     return Some((Ok(bytes), (upstream, parser, converter, pending, finished)));
                 }
                 if finished {
@@ -409,12 +409,14 @@ fn converted_stream(
                                         "upstream raw response chunk"
                                     );
                                     match convert_events(&mut converter, events) {
-                                        Ok(mut out) => {
-                                            out.reverse();
-                                            if let Some(bytes) = out.pop() {
+                                        Ok(out) => {
+                                            // FIFO queue: emit in order without a reverse pass.
+                                            let mut queue: std::collections::VecDeque<Bytes> =
+                                                out.into_iter().collect();
+                                            if let Some(bytes) = queue.pop_front() {
                                                 return Some((
                                                     Ok(bytes),
-                                                    (upstream, parser, converter, out, finished),
+                                                    (upstream, parser, converter, queue, finished),
                                                 ));
                                             }
                                         }
@@ -467,17 +469,16 @@ fn converted_stream(
                             match parser.finish() {
                                 Ok(Some(event)) => match converter.convert_event(event) {
                                     Ok(events) => {
-                                        let mut out: Vec<Bytes> = events
+                                        let mut queue: std::collections::VecDeque<Bytes> = events
                                             .into_iter()
                                             .map(|event| {
                                                 encode_sse(event.event.as_deref(), &event.data)
                                             })
                                             .collect();
-                                        out.reverse();
-                                        if let Some(bytes) = out.pop() {
+                                        if let Some(bytes) = queue.pop_front() {
                                             return Some((
                                                 Ok(bytes),
-                                                (upstream, parser, converter, out, finished),
+                                                (upstream, parser, converter, queue, finished),
                                             ));
                                         }
                                     }

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { buildDashboardWsUrl } from '../../lib/ws'
-import type { ConnectionState, DumpSummary } from './types'
+import type { ConnectionState, DumpSummary, ProcessLogLine } from './types'
 
 const MAX_PROCESS_LINES = 5_000
+// Coalesce bursts of log lines into a single state update per flush so high
+// log volume does not trigger N setStates (and N full-array copies) per frame.
+const FLUSH_INTERVAL_MS = 80
 
 type DumpLifecycleEvent = {
   type: 'created' | 'updated'
@@ -36,7 +39,7 @@ export function useLogsSocket({
   onChunk,
 }: UseLogsSocketOptions) {
   const [connection, setConnection] = useState<ConnectionState>('connecting')
-  const [processLines, setProcessLines] = useState<string[]>([])
+  const [processLines, setProcessLines] = useState<ProcessLogLine[]>([])
   const onDumpsDirRef = useRef(onDumpsDir)
   const onDumpEventRef = useRef(onDumpEvent)
   const onDumpDeletedRef = useRef(onDumpDeleted)
@@ -50,18 +53,30 @@ export function useLogsSocket({
     let disposed = false
     let reconnectTimer: number | null = null
     let ws: WebSocket | null = null
+    // Pending lines awaiting the next flush; flushed on an interval to avoid a
+    // setState per websocket message.
+    const pending: ProcessLogLine[] = []
+    let nextId = 1
 
-    function appendProcessLine(line: string) {
-      if (!line) return
+    function appendProcessLine(text: string) {
+      if (!text) return
+      pending.push({ id: nextId++, text })
+    }
+
+    function flushPending() {
+      if (pending.length === 0) return
+      const batch = pending.splice(0, pending.length)
       setProcessLines((current) => {
-        const next =
-          current.length >= MAX_PROCESS_LINES
-            ? current.slice(-MAX_PROCESS_LINES + 1)
+        const merged =
+          current.length + batch.length > MAX_PROCESS_LINES
+            ? current.slice(Math.max(0, current.length + batch.length - MAX_PROCESS_LINES))
             : current.slice()
-        next.push(line)
-        return next
+        for (const line of batch) merged.push(line)
+        return merged
       })
     }
+
+    const flushTimer = window.setInterval(flushPending, FLUSH_INTERVAL_MS)
 
     function connect() {
       if (disposed) return
@@ -132,6 +147,7 @@ export function useLogsSocket({
     connect()
     return () => {
       disposed = true
+      window.clearInterval(flushTimer)
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
       ws?.close()
     }

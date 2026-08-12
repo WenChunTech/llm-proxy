@@ -89,16 +89,19 @@ fn parse_config_json(raw: &str) -> Result<Config, ProxyError> {
 
 pub fn parse_config_value(value: Value) -> Result<Config, ProxyError> {
     let explicit_port = value.get("port").is_some();
-    let mut config: Config = serde_json::from_value(value.clone())?;
-    // Drop legacy `server` blob from flatten extras so it is not rewritten on save.
-    config.extra.remove("server");
-    if !explicit_port
-        && let Some(bind) = value
+    let legacy_port = if !explicit_port {
+        value
             .get("server")
             .and_then(|server| server.get("bind"))
             .and_then(Value::as_str)
-        && let Some(port) = parse_bind_port(bind)
-    {
+            .and_then(parse_bind_port)
+    } else {
+        None
+    };
+    let mut config: Config = serde_json::from_value(value)?;
+    // Drop legacy `server` blob from flatten extras so it is not rewritten on save.
+    config.extra.remove("server");
+    if let Some(port) = legacy_port {
         config.port = port;
     }
     Ok(config)

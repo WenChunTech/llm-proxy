@@ -79,7 +79,6 @@ impl DumpContext {
     }
 }
 
-#[derive(Debug)]
 pub struct DebugDumpSession {
     dir: PathBuf,
     id: String,
@@ -89,6 +88,11 @@ pub struct DebugDumpSession {
     is_streaming: bool,
     status: Option<u16>,
     hub: Option<DumpHub>,
+    /// When a Tokio runtime is available, stream chunks are forwarded to a
+    /// background blocking writer via this channel so the async streaming loop
+    /// never blocks on per-chunk disk I/O. `None` (no runtime, e.g. unit tests)
+    /// falls back to inline synchronous writes.
+    async_tx: Option<std::sync::mpsc::Sender<Bytes>>,
     response_file: Mutex<Option<File>>,
     response_path: Mutex<Option<PathBuf>>,
 }
@@ -121,6 +125,42 @@ impl DebugDumpSession {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| dir.display().to_string());
 
+        // Stream chunks are written by a background blocking task so the async
+        // streaming loop is not stalled by per-chunk disk I/O. Falls back to
+        // inline synchronous writes when no runtime is present (unit tests).
+        let async_tx = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                let (tx, rx) = std::sync::mpsc::channel::<Bytes>();
+                let writer_path = dir.join("response.sse");
+                handle.spawn_blocking(move || {
+                    let mut file = match OpenOptions::new().create(true).append(true).open(&writer_path) {
+                        Ok(file) => file,
+                        Err(error) => {
+                            tracing::warn!(
+                                path = %writer_path.display(),
+                                error = %error,
+                                "failed to open debug dump response stream file"
+                            );
+                            return;
+                        }
+                    };
+                    while let Ok(bytes) = rx.recv() {
+                        if let Err(error) = file.write_all(&bytes) {
+                            tracing::warn!(
+                                path = %writer_path.display(),
+                                error = %error,
+                                "failed to append debug dump response chunk"
+                            );
+                            break;
+                        }
+                    }
+                    let _ = file.flush();
+                });
+                Some(tx)
+            }
+            Err(_) => None,
+        };
+
         let session = Self {
             dir: dir.clone(),
             id,
@@ -130,6 +170,7 @@ impl DebugDumpSession {
             is_streaming: ctx.is_streaming,
             status: ctx.status,
             hub,
+            async_tx,
             response_file: Mutex::new(None),
             response_path: Mutex::new(None),
         };
@@ -216,10 +257,35 @@ impl DebugDumpSession {
         self.publish_updated();
     }
 
-    pub fn append_response_chunk(&self, chunk: &[u8]) {
+    pub fn append_response_chunk(&self, chunk: &Bytes) {
         if chunk.is_empty() {
             return;
         }
+        if let Some(tx) = &self.async_tx {
+            // Decoupled: hand the chunk to the background blocking writer so
+            // the async stream loop is not stalled by per-chunk disk I/O.
+            // `Bytes::clone` is a cheap Arc bump (no data copy).
+            let _ = tx.send(chunk.clone());
+        } else {
+            self.write_chunk_sync(chunk);
+        }
+
+        if let Some(hub) = self.hub.as_ref()
+            && hub.receiver_count() > 0
+        {
+            let text = String::from_utf8_lossy(chunk).into_owned();
+            if !text.is_empty() {
+                hub.publish(DumpEvent::Chunk {
+                    id: self.id.clone(),
+                    file: "response.sse".to_string(),
+                    text,
+                });
+            }
+        }
+    }
+
+    /// Inline synchronous write used when no Tokio runtime is available.
+    fn write_chunk_sync(&self, chunk: &[u8]) {
         let path = {
             let mut path_guard = match self.response_path.lock() {
                 Ok(guard) => guard,
@@ -261,20 +327,6 @@ impl DebugDumpSession {
                 error = %error,
                 "failed to append debug dump response chunk"
             );
-            return;
-        }
-
-        if let Some(hub) = self.hub.as_ref()
-            && hub.receiver_count() > 0
-        {
-            let text = String::from_utf8_lossy(chunk).into_owned();
-            if !text.is_empty() {
-                hub.publish(DumpEvent::Chunk {
-                    id: self.id.clone(),
-                    file: "response.sse".to_string(),
-                    text,
-                });
-            }
         }
     }
 

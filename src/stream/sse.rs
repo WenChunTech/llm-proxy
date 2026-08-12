@@ -34,17 +34,20 @@ impl SseParser {
         self.buffer.push_str(text);
 
         let mut events = Vec::new();
-        while let Some(line_end) = self.buffer.find('\n') {
-            let mut line = self.buffer.drain(..=line_end).collect::<String>();
-            if line.ends_with('\n') {
-                line.pop();
-            }
-            if line.ends_with('\r') {
-                line.pop();
-            }
-            if let Some(event) = self.push_line(&line)? {
+        let mut consumed = 0usize;
+        // Scan for complete lines without draining per line (avoids a memmove
+        // and allocation per line; borrows buffer immutably while mutating the
+        // disjoint `current` field).
+        while let Some(rel) = self.buffer[consumed..].find('\n') {
+            let line_end = consumed + rel;
+            let line = self.buffer[consumed..line_end].strip_suffix('\r').unwrap_or(&self.buffer[consumed..line_end]);
+            if let Some(event) = Self::push_line(&mut self.current, line)? {
                 events.push(event);
             }
+            consumed = line_end + 1;
+        }
+        if consumed > 0 {
+            self.buffer.drain(..consumed);
         }
         Ok(events)
     }
@@ -52,16 +55,19 @@ impl SseParser {
     pub fn finish(&mut self) -> Result<Option<SseEvent>, ProxyError> {
         if !self.buffer.is_empty() {
             let line = std::mem::take(&mut self.buffer);
-            if let Some(event) = self.push_line(line.trim_end_matches('\r'))? {
+            if let Some(event) = Self::push_line(&mut self.current, line.trim_end_matches('\r'))? {
                 return Ok(Some(event));
             }
         }
-        self.emit()
+        Self::emit(&mut self.current)
     }
 
-    fn push_line(&mut self, line: &str) -> Result<Option<SseEvent>, ProxyError> {
+    fn push_line(
+        current: &mut PartialEvent,
+        line: &str,
+    ) -> Result<Option<SseEvent>, ProxyError> {
         if line.is_empty() {
-            return self.emit();
+            return Self::emit(current);
         }
         if line.starts_with(':') {
             return Ok(None);
@@ -73,12 +79,12 @@ impl SseParser {
         };
 
         match field {
-            "event" => self.current.event = Some(value.to_string()),
-            "data" => self.current.data.push(value.to_string()),
-            "id" => self.current.id = Some(value.to_string()),
+            "event" => current.event = Some(value.to_string()),
+            "data" => current.data.push(value.to_string()),
+            "id" => current.id = Some(value.to_string()),
             "retry" => {
                 if let Ok(retry) = value.parse() {
-                    self.current.retry = Some(retry);
+                    current.retry = Some(retry);
                 }
             }
             _ => {}
@@ -86,21 +92,21 @@ impl SseParser {
         Ok(None)
     }
 
-    fn emit(&mut self) -> Result<Option<SseEvent>, ProxyError> {
-        if self.current.event.is_none()
-            && self.current.data.is_empty()
-            && self.current.id.is_none()
-            && self.current.retry.is_none()
+    fn emit(current: &mut PartialEvent) -> Result<Option<SseEvent>, ProxyError> {
+        if current.event.is_none()
+            && current.data.is_empty()
+            && current.id.is_none()
+            && current.retry.is_none()
         {
             return Ok(None);
         }
 
-        let current = std::mem::take(&mut self.current);
+        let taken = std::mem::take(current);
         Ok(Some(SseEvent {
-            event: current.event,
-            data: current.data.join("\n"),
-            id: current.id,
-            retry: current.retry,
+            event: taken.event,
+            data: taken.data.join("\n"),
+            id: taken.id,
+            retry: taken.retry,
         }))
     }
 }
@@ -112,7 +118,7 @@ pub struct OutboundSseEvent {
 }
 
 pub fn encode_sse(event: Option<&str>, data: &str) -> Bytes {
-    let mut out = String::new();
+    let mut out = String::with_capacity(data.len() + data.len() / 32 + 32);
     if let Some(event) = event {
         out.push_str("event: ");
         out.push_str(event);

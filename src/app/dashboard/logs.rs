@@ -69,14 +69,20 @@ pub(in crate::app) async fn api_debug_dumps(
         .to_string();
     let snapshot = state.snapshot().await;
     let base = dump_base_dir(&snapshot.config.debug_dump);
-    match list_dumps(&base, query.as_str()) {
-        Ok(items) => res.render(Json(json!({
+    // The dump directory can contain many entries; listing/reading it is
+    // blocking filesystem work, so run it off the async runtime.
+    let query_for_task = query.clone();
+    let result = tokio::task::spawn_blocking(move || list_dumps(&base, &query_for_task))
+        .await
+        .map_err(|err| ProxyError::Config(format!("dump listing task failed: {err}")));
+    match result {
+        Ok(Ok(items)) => res.render(Json(json!({
             "enabled": snapshot.config.debug_dump.enabled,
             "dir": snapshot.config.debug_dump.dir,
             "query": query,
             "items": items,
         }))),
-        Err(error) => render_error(res, error),
+        Ok(Err(error)) | Err(error) => render_error(res, error),
     }
 }
 
@@ -100,9 +106,12 @@ pub(in crate::app) async fn api_debug_dump_detail(
     };
     let snapshot = state.snapshot().await;
     let base = dump_base_dir(&snapshot.config.debug_dump);
-    match read_dump_detail(&base, &id) {
-        Ok(detail) => res.render(Json(detail)),
-        Err(error) => render_error(res, error),
+    let result = tokio::task::spawn_blocking(move || read_dump_detail(&base, &id))
+        .await
+        .map_err(|err| ProxyError::Config(format!("dump detail task failed: {err}")));
+    match result {
+        Ok(Ok(detail)) => res.render(Json(detail)),
+        Ok(Err(error)) | Err(error) => render_error(res, error),
     }
 }
 
@@ -133,8 +142,15 @@ pub(in crate::app) async fn api_debug_dump_file(
     };
     let snapshot = state.snapshot().await;
     let base = dump_base_dir(&snapshot.config.debug_dump);
-    match read_dump_file_bytes(&base, &id, &file) {
-        Ok((_path, bytes)) => {
+    let id_for_task = id.clone();
+    let file_for_task = file.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        read_dump_file_bytes(&base, &id_for_task, &file_for_task)
+    })
+    .await
+    .map_err(|err| ProxyError::Config(format!("dump file read task failed: {err}")));
+    match result {
+        Ok(Ok((_path, bytes))) => {
             let filename = format!("{id}_{file}");
             res.headers_mut().insert(
                 header::CONTENT_TYPE,
@@ -148,7 +164,7 @@ pub(in crate::app) async fn api_debug_dump_file(
             }
             res.body(bytes);
         }
-        Err(error) => render_error(res, error),
+        Ok(Err(error)) | Err(error) => render_error(res, error),
     }
 }
 

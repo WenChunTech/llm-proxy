@@ -495,7 +495,7 @@ export function LogsView({
                 onClick={() =>
                   downloadText(
                     `process-${new Date().toISOString().replaceAll(':', '').slice(0, 15)}.log`,
-                    `${processLines.join('\n')}\n`,
+                    `${processLines.map((l) => l.text).join('\n')}\n`,
                   )
                 }
               >

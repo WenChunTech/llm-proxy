@@ -1,5 +1,7 @@
 export type PageTab = 'dumps' | 'process' | 'settings'
 
+export type ProcessLogLine = { id: number; text: string }
+
 export type ConnectionState = 'connecting' | 'open' | 'closed' | 'error'
 
 export type DumpSummary = {

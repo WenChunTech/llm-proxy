@@ -14,7 +14,10 @@ use crate::{
     state::AppState,
 };
 
-pub(crate) const JSON_MAX_SIZE: usize = usize::MAX;
+/// Upper bound on request body size accepted by proxy and dashboard routes.
+/// Generous enough for large-context LLM requests while preventing unbounded
+/// memory growth from malformed/huge bodies.
+pub(crate) const JSON_MAX_SIZE: usize = 64 * 1024 * 1024;
 
 pub fn router(state: AppState) -> Router {
     Router::new()

@@ -368,21 +368,29 @@ fn initial_state(
     }
 }
 
+/// Minimal projection used only to extract the SSE `event:` field from a
+/// serialized chunk. serde tokenizes the JSON but allocates only this one
+/// string, skipping (not cloning) every other field — cheaper than building
+/// a full `serde_json::Value` tree of the whole chunk.
+#[derive(serde::Deserialize)]
+struct EventTypePeek {
+    #[serde(default)]
+    r#type: Option<String>,
+}
+
 fn values_to_events<T: serde::Serialize>(
     chunks: Vec<T>,
 ) -> Result<Vec<OutboundSseEvent>, ProxyError> {
     chunks
         .into_iter()
         .map(|chunk| {
-            let value = serde_json::to_value(chunk)?;
-            let event = value
-                .get("type")
-                .and_then(|value| value.as_str())
-                .map(ToOwned::to_owned);
-            Ok(OutboundSseEvent {
-                event,
-                data: serde_json::to_string(&value)?,
-            })
+            // Serialize once (struct -> string) instead of building a Value
+            // tree and re-serializing it (two passes + per-field allocations).
+            let data = serde_json::to_string(&chunk)?;
+            let event = serde_json::from_str::<EventTypePeek>(&data)
+                .ok()
+                .and_then(|peek| peek.r#type);
+            Ok(OutboundSseEvent { event, data })
         })
         .collect()
 }
