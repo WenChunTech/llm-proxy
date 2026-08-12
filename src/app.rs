@@ -77,6 +77,12 @@ pub fn router(state: AppState) -> Router {
                 .push(Router::with_path("models").get(proxy::models)),
         )
         .push(
+            Router::with_path("grok/v1")
+                .hoop(auth)
+                .push(Router::with_path("responses").post(proxy::grok_responses))
+                .push(Router::with_path("models").get(proxy::models)),
+        )
+        .push(
             Router::with_path("v1beta")
                 .hoop(auth)
                 .push(Router::with_path("models/{modelName}").post(proxy::gemini_model)),

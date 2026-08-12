@@ -36,6 +36,11 @@ pub(super) async fn openai_responses(req: &mut Request, depot: &mut Depot, res: 
 }
 
 #[handler]
+pub(super) async fn grok_responses(req: &mut Request, depot: &mut Depot, res: &mut Response) {
+    handle_model_request(req, depot, res, ProviderType::Grok).await;
+}
+
+#[handler]
 pub(super) async fn image_generations(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     handle_image_generation(req, depot, res).await;
 }
