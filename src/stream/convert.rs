@@ -170,7 +170,12 @@ impl ProtocolStreamConverter {
                 values_to_events(chunks)
             }
             ProviderType::Responses => Ok(Vec::new()),
-            ProviderType::Codex | ProviderType::Grok => Ok(Vec::new()),
+            ProviderType::Grok => {
+                // OpenAI Responses stream events map 1:1 onto Grok stream events.
+                let converted: grok::StreamResponse = chunk.into();
+                values_to_events(vec![converted])
+            }
+            ProviderType::Codex => Ok(Vec::new()),
         }
     }
 
@@ -207,7 +212,16 @@ impl ProtocolStreamConverter {
                 values_to_events(chunks)
             }
             ProviderType::Claude => Ok(Vec::new()),
-            ProviderType::Codex | ProviderType::Grok => Ok(Vec::new()),
+            ProviderType::Grok => {
+                let wrapper = ClaudeStreamWrapper {
+                    chunk,
+                    state: self.take_state(),
+                };
+                let converted: converter::convert::GrokStreamsWrapper = wrapper.into();
+                self.state = converted.state;
+                values_to_events(converted.chunks)
+            }
+            ProviderType::Codex => Ok(Vec::new()),
         }
     }
 
@@ -243,7 +257,16 @@ impl ProtocolStreamConverter {
                 values_to_events(converted.chunks)
             }
             ProviderType::Gemini => Ok(Vec::new()),
-            ProviderType::Codex | ProviderType::Grok => Ok(Vec::new()),
+            ProviderType::Grok => {
+                let wrapper = GeminiCliStreamWrapper {
+                    chunk,
+                    state: self.take_state(),
+                };
+                let converted: converter::convert::GrokStreamsWrapper = wrapper.into();
+                self.state = converted.state;
+                values_to_events(converted.chunks)
+            }
+            ProviderType::Codex => Ok(Vec::new()),
         }
     }
 
