@@ -5,8 +5,11 @@
 //! - Rewrite only when the upstream provider declares a dialect profile *and*
 //!   the request endpoint protocol already matches that wire protocol.
 //! - Cross-protocol entry paths convert to wire shape but skip dialect rewrite.
+//! - `compat` is an always-on wire-compatibility normalization (runs after convert
+//!   and rewrite) applied to both passthrough and converted requests.
 //! - If neither is needed, the body is left unchanged (aside from common flags).
 
+mod chat;
 mod codex;
 mod grok;
 mod helpers;
@@ -25,6 +28,10 @@ struct ProviderRequestProfile {
     /// Vendor dialect rewrite applied only when the entry endpoint already
     /// matches this wire protocol (no cross-protocol convert on this path).
     rewrite: Option<RewriteFn>,
+    /// Always-on wire-compatibility normalization applied after convert/rewrite
+    /// regardless of source protocol. Used for wire-wide vendor-compat tweaks
+    /// that must affect both passthrough and cross-protocol converted requests.
+    compat: Option<RewriteFn>,
     /// Whether this provider accepts a top-level `stream` flag.
     sets_stream: bool,
 }
@@ -34,26 +41,31 @@ fn profile_for(provider: ProviderType) -> ProviderRequestProfile {
         ProviderType::Chat => ProviderRequestProfile {
             wire: ProviderType::Chat,
             rewrite: None,
+            compat: Some(chat::normalize_roles),
             sets_stream: true,
         },
         ProviderType::Responses => ProviderRequestProfile {
             wire: ProviderType::Responses,
             rewrite: None,
+            compat: None,
             sets_stream: true,
         },
         ProviderType::Claude => ProviderRequestProfile {
             wire: ProviderType::Claude,
             rewrite: None,
+            compat: None,
             sets_stream: true,
         },
         ProviderType::Gemini => ProviderRequestProfile {
             wire: ProviderType::Gemini,
             rewrite: None,
+            compat: None,
             sets_stream: false,
         },
         ProviderType::Codex => ProviderRequestProfile {
             wire: ProviderType::Responses,
             rewrite: Some(codex::rewrite),
+            compat: None,
             sets_stream: true,
         },
         ProviderType::Grok => ProviderRequestProfile {
@@ -62,6 +74,7 @@ fn profile_for(provider: ProviderType) -> ProviderRequestProfile {
             // speaks Grok (source == wire).
             wire: ProviderType::Grok,
             rewrite: Some(grok::rewrite),
+            compat: None,
             sets_stream: true,
         },
     }
@@ -73,7 +86,8 @@ fn profile_for(provider: ProviderType) -> ProviderRequestProfile {
 /// 1. `convert` when `source != upstream.wire`
 /// 2. `rewrite` when the upstream profile has a dialect *and*
 ///    `source == upstream.wire` (endpoint matches provider request protocol)
-/// 3. common flags (`stream`, …)
+/// 3. `compat` always-on wire-compatibility normalization
+/// 4. common flags (`stream`, …)
 pub fn prepare_request(
     upstream: ProviderType,
     mut body: Value,
@@ -91,6 +105,7 @@ pub fn prepare_request(
         wire = ?profile.wire,
         need_convert,
         need_rewrite,
+        has_compat = profile.compat.is_some(),
         "preparing upstream request"
     );
 
@@ -100,6 +115,10 @@ pub fn prepare_request(
 
     if need_rewrite && let Some(rewrite) = profile.rewrite {
         body = rewrite(body)?;
+    }
+
+    if let Some(compat) = profile.compat {
+        body = compat(body)?;
     }
 
     if profile.sets_stream

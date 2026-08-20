@@ -270,3 +270,75 @@ fn passthrough_rewrite_is_identity() {
     let out = rewrite_request(ProviderType::Responses, body.clone()).unwrap();
     assert_eq!(out, body);
 }
+
+#[test]
+fn chat_passthrough_normalizes_developer_role_to_system() {
+    let providers = Providers::new();
+    let body = json!({
+        "model": "glm-5.2",
+        "messages": [
+            {"role": "developer", "content": "you are helpful"},
+            {"role": "user", "content": "hi"},
+            {"role": "system", "content": "keep system"},
+            {"role": "assistant", "content": "ok"}
+        ]
+    });
+
+    let out = providers
+        .prepare_request(ProviderType::Chat, body, ProviderType::Chat, true)
+        .expect("prepare_request");
+
+    let roles: Vec<&str> = out["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .map(|m| m["role"].as_str().expect("role"))
+        .collect();
+    // developer folds into system; other roles are untouched.
+    assert_eq!(roles, vec!["system", "user", "system", "assistant"]);
+    assert_eq!(out["messages"][0]["content"], "you are helpful");
+    assert_eq!(out["stream"], true);
+}
+
+#[test]
+fn chat_normalize_developer_role_after_cross_protocol_convert() {
+    let providers = Providers::new();
+    // Responses entry with a developer message converts to the Chat wire
+    // (which preserves developer), then the always-on compat step must fold
+    // developer into system so compatible backends accept the request.
+    let body = json!({
+        "model": "glm-5.2",
+        "input": [
+            {"role": "developer", "content": "you are helpful"},
+            {"role": "user", "content": "hi"}
+        ]
+    });
+
+    let out = providers
+        .prepare_request(ProviderType::Chat, body, ProviderType::Responses, true)
+        .expect("prepare_request");
+
+    let roles: Vec<&str> = out["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .map(|m| m["role"].as_str().expect("role"))
+        .collect();
+    assert!(
+        !roles.contains(&"developer"),
+        "developer role must be normalized to system on the chat wire: {roles:?}"
+    );
+    assert!(roles.contains(&"system"));
+    assert_eq!(out["stream"], true);
+}
+
+#[test]
+fn chat_normalize_is_safe_without_messages_array() {
+    let providers = Providers::new();
+    let body = json!({"model": "glm-5.2", "prompt": "hi"});
+    let out = providers
+        .prepare_request(ProviderType::Chat, body, ProviderType::Chat, false)
+        .expect("prepare_request");
+    assert_eq!(out["prompt"], "hi");
+    assert_eq!(out["stream"], false);
+}
