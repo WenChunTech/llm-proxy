@@ -18,6 +18,7 @@ const REQUEST_BLOCKLIST: &[&str] = &[
     "proxy-connection",
     "x-api-key",
     "x-goog-api-key",
+    "accept-encoding",
 ];
 
 const RESPONSE_BLOCKLIST: &[&str] = &[

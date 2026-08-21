@@ -129,20 +129,44 @@ converter 仓均含；前端 `bun run build` + `bun run lint`)。
 - 改动：反序列化前先用 `value.get(…)` 借用提取 `legacy_port`(一个 `Option<u16>`)，
   再 `serde_json::from_value(value)` 消费 owned Value，消除整串克隆。
 
-## 待办(缓办)
 
-- **Grok 字符串判别字段去字符串化**(原分析 #8)：`converter/src/models/grok/common.rs`
-  多个 `status`/`*_type` 为 `String`/`Option<String>`，驱使 `openai_responses/grok/request.rs`
-  含 55+ `.to_string()` 及反向匹配，跨约 6 个文件、100+ 处。未实施原因：OpenAI 对应
-  枚举(如 `WebSearchCallStatus`)为严格枚举且无 `#[serde(other)]` 兜底，而 Grok 当前
-  `Option<String>` 是宽松的(可容纳任意未知状态串)；改为严格枚举后，真实 Grok 流量若
-  出现未知状态值将反序列化失败、直接中断该请求。需先加未知值兜底(如 `#[serde(other)]`
-  Unknown 变体并对照真实 Grok 流量验证)，改动面与风险都较大，留作后续专项重构。
+## 流式热路径(converter)(续)
+### 12. Grok 字符串判别字段去字符串化
+
+- 文件：`converter/src/models/grok/common.rs`
+        `converter/src/models/openai/responses/common.rs`
+        `converter/src/convert/grok/openai_chat/{stream_,}response.rs`
+        `converter/src/convert/grok/openai_responses/request.rs`
+        `converter/src/convert/openai_chat/grok/{request,stream_response}.rs`
+        `converter/src/convert/openai_responses/grok/{request,response}.rs`
+        `converter/src/convert/claude/grok/{request,response,stream_response}.rs`
+        `converter/src/convert/gemini_cli/grok/{request,response,stream_response}.rs`
+        `converter/src/convert/gemini_cli/openai_responses/response.rs`
+        `converter/src/convert/claude/openai_responses/response.rs`
+        `converter/tests/test_grok_responses_parse.rs`
+- 问题：`converter/src/models/grok/common.rs` 多个 `status`/`*_type` 为
+  `String`/`Option<String>`，驱使跨约 15 个转换文件、100+ 处 `.to_string()`
+  及反向 `as_deref()` 匹配。
+- 改动：将 Grok 的判别字段从 `String`/`Option<String>` 收紧为严格枚举类型，
+  直接复用 OpenAI Responses 侧已有枚举(`ItemStatus`/`WebSearchCallStatus`/
+  `FileSearchStatus`/`CodeInterpreterStatus`/`McpToolCallStatus`/
+  `ImageGenerationCallStatus`/`SearchContextSize`/`ToolChoiceOptions`/
+  `UserLocationType`/`SummaryType`)；新增单值枚举(`AnnotationType`/
+  `InputMessageType`/`WebSearchSourceType`/`ShellActionType`/
+  `ShellEnvironmentType`/`ToolChoiceFunctionType`)及 `ReasoningTextType`。
+  所有枚举实现 `as_str(&self)` + `From<&str>`，未知值通过 `From<&str>` 的
+  fallback 分支兜底(映射到 `Default` 变体)，避免严格反序列化中断请求。
+  转换层 `"foo".to_string()` 全量替换为 `"foo".into()`，`as_deref()` 替换为
+  `as_ref().map(|s| s.as_str())`。
+- 验证：通过 `docs.x.ai` Responses API 文档确认各状态枚举值域；
+  `cargo check` + `cargo test` + `cargo clippy --all-targets -- -D warnings`
+  (主仓 + converter 仓)均通过。
+
+## 待办(缓办)
 
 - **Grok metadata 类型对齐**(原分析 #9)：Grok
   `metadata: Option<HashMap<String, Value>>` vs OpenAI `HashMap<String, String>`。
-  未实施原因：metadata 转换每请求仅一次(非每 chunk)，现有转换代码已正确处理类型
-  不匹配(Grok→Responses 过滤非字符串值；Grok→Chat 字符串化非字符串值)；Grok 模型
-  处于协议边缘，按项目规约 `Value` 可接受。将 Grok 字段收紧为 `HashMap<String,String>`
-  属严格反序列化——若 xAI 实际流量含非字符串 metadata 值将直接失败，且无真实流量
-  样本可验证。性能收益微乎其微(每请求 0–2 条目)，风险不匹配，缓办。
+  缓办原因：xAI 文档标注 `metadata` 为"不支持，仅为兼容保留"，实际流量中极少出现；
+  metadata 转换每请求仅一次(非每 chunk)，现有转换代码已正确处理类型不匹配
+  (Grok→Responses 过滤非字符串值；Grok→Chat 字符串化非字符串值)；性能收益微乎其微
+  (每请求 0–2 条目)，风险不匹配，缓办。

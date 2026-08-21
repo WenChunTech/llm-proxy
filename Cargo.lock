@@ -263,6 +263,7 @@ dependencies = [
 [[package]]
 name = "converter"
 version = "1.0.0"
+source = "git+ssh://git@github.com/WenChunTech/converter.git?branch=master#a941bcfe091c6625a9aecc6231d3edc6c29de566"
 dependencies = [
  "serde",
  "serde_json",
@@ -1024,7 +1025,7 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "llm-proxy"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "base64",
  "bytes",
