@@ -204,14 +204,10 @@ fn validation_probe_request_has_single_content_type() {
         "stream": true,
         "max_output_tokens": 16,
     });
-    let request = build_validation_probe_request(
-        &client,
-        "https://api.x.ai/v1/responses",
-        &headers,
-        &body,
-    )
-    .build()
-    .expect("build request");
+    let request =
+        build_validation_probe_request(&client, "https://api.x.ai/v1/responses", &headers, &body)
+            .build()
+            .expect("build request");
 
     let content_types: Vec<_> = request
         .headers()
@@ -237,8 +233,7 @@ fn validation_probe_request_has_single_content_type() {
 #[test]
 fn grok_oauth_bad_credentials_classifies_as_invalid_auth() {
     let body = r#"{"code":"unauthenticated:bad-credentials","error":"The OAuth2 access token could not be validated."}"#;
-    let (valid, reason, message) =
-        classify_auth_validation_response(ProviderType::Grok, 403, body);
+    let (valid, reason, message) = classify_auth_validation_response(ProviderType::Grok, 403, body);
     assert!(!valid);
     assert_eq!(reason, "invalid_auth");
     // Dashboard must show the upstream body verbatim (same as curl output).
@@ -260,9 +255,11 @@ fn content_type_415_stays_request_error_not_invalid_auth() {
     // If dual Content-Type regresses, upstream returns 415 — that is a client
     // request bug, not proof the token is bad.
     let body = r#"{"error":"Expected request with `Content-Type: application/json`"}"#;
-    let (valid, reason, message) =
-        classify_auth_validation_response(ProviderType::Grok, 415, body);
+    let (valid, reason, message) = classify_auth_validation_response(ProviderType::Grok, 415, body);
     assert!(valid, "request_error remains auth-usable");
     assert_eq!(reason, "request_error");
-    assert_eq!(message, body, "raw upstream body must be preserved for display");
+    assert_eq!(
+        message, body,
+        "raw upstream body must be preserved for display"
+    );
 }

@@ -36,8 +36,14 @@ fn get_forwardable_request_headers_strips_accept_encoding() {
     assert!(!forwarded.contains_key("cookie"));
     assert!(!forwarded.contains_key("x-goog-api-key"));
 
-    assert_eq!(forwarded.get("user-agent").map(|v| v.as_str()), Some("llm-proxy-test"));
-    assert_eq!(forwarded.get("x-request-id").map(|v| v.as_str()), Some("1234"));
+    assert_eq!(
+        forwarded.get("user-agent").map(|v| v.as_str()),
+        Some("llm-proxy-test")
+    );
+    assert_eq!(
+        forwarded.get("x-request-id").map(|v| v.as_str()),
+        Some("1234")
+    );
 }
 
 #[test]
@@ -60,5 +66,8 @@ fn filter_response_headers_strips_encoding_and_length() {
         filtered.get("content-type").map(|v| v.as_str()),
         Some("application/json")
     );
-    assert_eq!(filtered.get("x-request-id").map(|v| v.as_str()), Some("4567"));
+    assert_eq!(
+        filtered.get("x-request-id").map(|v| v.as_str()),
+        Some("4567")
+    );
 }

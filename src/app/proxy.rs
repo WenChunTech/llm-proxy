@@ -90,13 +90,10 @@ async fn handle_model_request(
     let snapshot = state.snapshot().await;
     let client_body = Arc::new(request_body);
     let stream_context = StreamContext::from_request(target, client_body.as_ref());
-    // `/grok/v1/responses` accepts Grok-format requests but serves responses in
-    // OpenAI Responses wire format: OpenAI Responses providers pass their
-    // responses through directly instead of being converted to Grok.
-    let response_target = match target {
-        ProviderType::Grok => ProviderType::Responses,
-        other => other,
-    };
+    // `/grok/v1/responses` accepts Grok-format requests and serves responses
+    // in Grok wire format: Grok providers pass through directly, while non-Grok
+    // providers are converted to Grok.
+    let response_target = target;
     let (model, is_streaming, body) = match parse_model_request(req, target, (*client_body).clone())
     {
         Ok(parsed) => parsed,
@@ -133,9 +130,16 @@ async fn handle_model_request(
             if let Some(session) = dump.as_ref() {
                 session.write_request(client_body.as_ref());
             }
-            if let Err(error) =
-                write_execute_result(res, &state, response_target, &model, stream_context, result, dump)
-                    .await
+            if let Err(error) = write_execute_result(
+                res,
+                &state,
+                response_target,
+                &model,
+                stream_context,
+                result,
+                dump,
+            )
+            .await
             {
                 render_error(res, error);
             }

@@ -40,7 +40,9 @@ impl SseParser {
         // disjoint `current` field).
         while let Some(rel) = self.buffer[consumed..].find('\n') {
             let line_end = consumed + rel;
-            let line = self.buffer[consumed..line_end].strip_suffix('\r').unwrap_or(&self.buffer[consumed..line_end]);
+            let line = self.buffer[consumed..line_end]
+                .strip_suffix('\r')
+                .unwrap_or(&self.buffer[consumed..line_end]);
             if let Some(event) = Self::push_line(&mut self.current, line)? {
                 events.push(event);
             }
@@ -62,10 +64,7 @@ impl SseParser {
         Self::emit(&mut self.current)
     }
 
-    fn push_line(
-        current: &mut PartialEvent,
-        line: &str,
-    ) -> Result<Option<SseEvent>, ProxyError> {
+    fn push_line(current: &mut PartialEvent, line: &str) -> Result<Option<SseEvent>, ProxyError> {
         if line.is_empty() {
             return Self::emit(current);
         }

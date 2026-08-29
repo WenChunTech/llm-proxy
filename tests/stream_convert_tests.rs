@@ -116,7 +116,10 @@ fn claude_stream_message_start_converts_to_grok() {
 
     assert!(!events.is_empty(), "Grok conversion must not be empty");
     let data: Value = serde_json::from_str(&events[0].data).expect("Grok SSE data is JSON");
-    assert!(data["type"].is_string(), "converted event must carry a type");
+    assert!(
+        data["type"].is_string(),
+        "converted event must carry a type"
+    );
 }
 
 #[test]
@@ -151,5 +154,8 @@ fn gemini_stream_text_candidate_converts_to_grok() {
 
     assert!(!events.is_empty(), "Grok conversion must not be empty");
     let data: Value = serde_json::from_str(&events[0].data).expect("Grok SSE data is JSON");
-    assert!(data["type"].is_string(), "converted event must carry a type");
+    assert!(
+        data["type"].is_string(),
+        "converted event must carry a type"
+    );
 }

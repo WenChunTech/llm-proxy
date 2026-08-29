@@ -133,7 +133,11 @@ impl DebugDumpSession {
                 let (tx, rx) = std::sync::mpsc::channel::<Bytes>();
                 let writer_path = dir.join("response.sse");
                 handle.spawn_blocking(move || {
-                    let mut file = match OpenOptions::new().create(true).append(true).open(&writer_path) {
+                    let mut file = match OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&writer_path)
+                    {
                         Ok(file) => file,
                         Err(error) => {
                             tracing::warn!(
