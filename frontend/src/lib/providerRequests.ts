@@ -97,8 +97,10 @@ export function getProviderModelsEndpointFor(kind: ProviderKind, baseUrl: string
     }
 
     const isOpenAIStyle = ['openai_chat', 'openai_responses', 'codex', 'grok'].includes(kind)
-    const hasVersionPath = /\/v\d+$/.test(pathname)
-    const suffix = !isOpenAIStyle && !hasVersionPath ? 'v1/models' : 'models'
+    const hasVersionPath = /\/v\d+(?:beta)?$/.test(pathname)
+    const suffix = kind === 'gemini'
+      ? (hasVersionPath ? 'models' : 'v1beta/models')
+      : (!isOpenAIStyle && !hasVersionPath ? 'v1/models' : 'models')
     url.pathname = appendUrlPath(pathname, suffix)
     return url.toString()
   } catch {

@@ -23,7 +23,7 @@ use crate::{
     util::debug_dump::{DebugDumpSession, DumpContext, tee_stream},
 };
 
-use super::{JSON_MAX_SIZE, apply_headers, dashboard::models_payload, render_error};
+use super::{JSON_MAX_SIZE, apply_headers, dashboard::{gemini_models_payload, models_payload}, render_error};
 
 #[handler]
 pub(super) async fn openai_chat(req: &mut Request, depot: &mut Depot, res: &mut Response) {
@@ -63,6 +63,16 @@ pub(super) async fn models(depot: &mut Depot, res: &mut Response) {
     };
     let snapshot = state.snapshot().await;
     res.render(Json(models_payload(&snapshot)));
+}
+
+#[handler]
+pub(super) async fn gemini_models(depot: &mut Depot, res: &mut Response) {
+    let Some(state) = depot.get::<AppState>("state").ok().cloned() else {
+        render_error(res, ProxyError::Config("missing app state".to_string()));
+        return;
+    };
+    let snapshot = state.snapshot().await;
+    res.render(Json(gemini_models_payload(&snapshot)));
 }
 
 async fn handle_model_request(

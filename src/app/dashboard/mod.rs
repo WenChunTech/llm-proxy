@@ -27,7 +27,7 @@ use crate::{error::ProxyError, provider::types::ProviderType};
 
 use super::{JSON_MAX_SIZE, render_error, state_from_depot};
 use config::config_payload;
-pub(crate) use config::models_payload;
+pub(crate) use config::{gemini_models_payload, models_payload};
 use provider_models::fetch_provider_models;
 use provider_test::{
     stream_provider_model, test_provider_model, write_provider_test_stream_response,

@@ -52,6 +52,32 @@ pub(crate) fn models_payload(snapshot: &AppSnapshot) -> Value {
     json!({ "object": "list", "data": data })
 }
 
+pub(crate) fn gemini_models_payload(snapshot: &AppSnapshot) -> Value {
+    let mut seen = std::collections::HashSet::new();
+    let mut models: Vec<Value> = Vec::new();
+    for (id, _provider) in snapshot.registry.configured_models() {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        models.push(json!({
+            "name": id,
+            "baseModelId": null,
+            "version": null,
+            "displayName": id,
+            "description": null,
+            "inputTokenLimit": null,
+            "outputTokenLimit": null,
+            "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+            "thinking": null,
+            "temperature": null,
+            "maxTemperature": null,
+            "topP": null,
+            "topK": null,
+        }));
+    }
+    json!({ "models": models, "nextPageToken": null })
+}
+
 fn dashboard_providers(config: &Config) -> Vec<DashboardProvider> {
     let mut providers = Vec::new();
     for (provider_type, index, provider_config) in config.providers.iter_configs() {

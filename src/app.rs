@@ -88,6 +88,7 @@ pub fn router(state: AppState) -> Router {
         .push(
             Router::with_path("v1beta")
                 .hoop(auth)
+                .push(Router::with_path("models").get(proxy::gemini_models))
                 .push(Router::with_path("models/{modelName}").post(proxy::gemini_model)),
         )
         .push(Router::with_path("{**path}").options(cors_preflight))

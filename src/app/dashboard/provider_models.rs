@@ -25,16 +25,17 @@ pub(super) async fn fetch_provider_models(
         .get(&endpoint)
         .header("accept", "application/json")
         .timeout(Duration::from_secs(8));
-    if !api_key.is_empty() {
+    if request.kind == "gemini" {
+        if !api_key.is_empty() {
+            builder = builder.header("x-goog-api-key", api_key);
+        }
+    } else if !api_key.is_empty() {
         builder = builder.bearer_auth(api_key).header("x-api-key", api_key);
     } else if let Some(token) = auth_access_token(request.auth.as_ref()) {
         builder = builder.bearer_auth(token);
     }
     if request.kind == "claude" {
         builder = builder.header("anthropic-version", "2023-06-01");
-    }
-    if request.kind == "gemini" {
-        builder = builder.header("x-goog-api-key", api_key);
     }
     if request.kind == "codex" {
         builder = builder
@@ -80,6 +81,23 @@ fn parse_provider_model_list(value: &Value) -> Vec<String> {
     model_ids
 }
 
+fn parse_gemini_model_list(value: &Value) -> Vec<String> {
+    value
+        .get("models")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let name = item.get("name").and_then(Value::as_str)?.trim();
+            let display = item.get("displayName").and_then(Value::as_str)?.trim();
+            if name.is_empty() || display.is_empty() {
+                return None;
+            }
+            Some(name.strip_prefix("models/").unwrap_or(name).to_owned())
+        })
+        .collect()
+}
+
 fn parse_model_data_list(value: &Value) -> Vec<String> {
     value
         .get("data")
@@ -87,19 +105,6 @@ fn parse_model_data_list(value: &Value) -> Vec<String> {
         .into_iter()
         .flatten()
         .filter_map(|item| item.get("id").and_then(Value::as_str))
-        .filter(|id| !id.trim().is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
-}
-
-fn parse_gemini_model_list(value: &Value) -> Vec<String> {
-    value
-        .get("models")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item.get("name").and_then(Value::as_str))
-        .filter_map(|name| name.strip_prefix("models/").or(Some(name)))
         .filter(|id| !id.trim().is_empty())
         .map(ToOwned::to_owned)
         .collect()

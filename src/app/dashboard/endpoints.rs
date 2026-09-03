@@ -22,7 +22,9 @@ pub fn build_provider_models_endpoint(
         let is_openai_style = ProviderType::from_config_id(provider_kind)
             .is_some_and(ProviderType::uses_openai_models_endpoint);
         let has_version_path = has_version_path(&pathname);
-        let suffix = if !is_openai_style && !has_version_path {
+        let suffix = if provider_kind == "gemini" {
+            if has_version_path { "models" } else { "v1beta/models" }
+        } else if !is_openai_style && !has_version_path {
             "v1/models"
         } else {
             "models"
@@ -41,8 +43,11 @@ fn has_version_path(pathname: &str) -> bool {
     let Some(segment) = pathname.rsplit('/').find(|segment| !segment.is_empty()) else {
         return false;
     };
-    let Some(version) = segment.strip_prefix('v') else {
+    let Some(rest) = segment.strip_prefix('v') else {
         return false;
     };
-    !version.is_empty() && version.chars().all(|item| item.is_ascii_digit())
+    let Some(digits_end) = rest.find(|c: char| !c.is_ascii_digit()) else {
+        return !rest.is_empty();
+    };
+    digits_end > 0 && &rest[digits_end..] == "beta"
 }
