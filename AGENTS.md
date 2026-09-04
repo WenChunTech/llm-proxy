@@ -77,6 +77,7 @@ Every completed task must be verified before reporting done. Do not claim comple
 Required verification commands (Rust-only iteration):
 
 ```bash
+cargo fmt
 LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo check
 LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo test
 LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo clippy --all-targets -- -D warnings
@@ -93,10 +94,11 @@ cargo clippy --all-targets -- -D warnings
 
 Rules:
 
+- Run `cargo fmt` after modifying Rust code to keep formatting consistent.
 - Treat clippy warnings as failures (`-D warnings`).
 - If a check fails, fix it in the same task; do not leave known breakage.
 - Prefer focused tests first, then full `cargo test` before final handoff.
-- In the final response, briefly report that compile / tests / clippy all passed.
+- In the final response, briefly report that fmt / compile / tests / clippy all passed.
 
 ## Rust Backend Conventions
 
@@ -145,6 +147,7 @@ LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo build
 ### Common Commands (Rust)
 
 ```bash
+cargo fmt
 LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo check
 LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo test
 LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo clippy --all-targets -- -D warnings
@@ -154,7 +157,7 @@ cargo run -- --config config.json
 Task completion gate (must all succeed):
 
 ```bash
-LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo check && LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo test && LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo clippy --all-targets -- -D warnings
+cargo fmt && LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo check && LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo test && LLM_PROXY_SKIP_FRONTEND_BUILD=1 cargo clippy --all-targets -- -D warnings
 ```
 
 ## Frontend Conventions (`frontend/`)
@@ -250,6 +253,7 @@ cargo build
 - [ ] No lock-across-await or blocking calls in async paths
 - [ ] Tests updated for changed pure logic
 - [ ] Frontend types/API mappers stay in sync with backend dashboard payloads
+- [ ] `cargo fmt` run (no unformatted code)
 - [ ] `cargo check` succeeds (compile clean)
 - [ ] `cargo test` passes
 - [ ] `cargo clippy --all-targets -- -D warnings` has zero warnings

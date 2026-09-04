@@ -23,7 +23,11 @@ pub fn build_provider_models_endpoint(
             .is_some_and(ProviderType::uses_openai_models_endpoint);
         let has_version_path = has_version_path(&pathname);
         let suffix = if provider_kind == "gemini" {
-            if has_version_path { "models" } else { "v1beta/models" }
+            if has_version_path {
+                "models"
+            } else {
+                "v1beta/models"
+            }
         } else if !is_openai_style && !has_version_path {
             "v1/models"
         } else {

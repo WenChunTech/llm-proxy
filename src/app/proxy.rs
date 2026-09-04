@@ -23,7 +23,11 @@ use crate::{
     util::debug_dump::{DebugDumpSession, DumpContext, tee_stream},
 };
 
-use super::{JSON_MAX_SIZE, apply_headers, dashboard::{gemini_models_payload, models_payload}, render_error};
+use super::{
+    JSON_MAX_SIZE, apply_headers,
+    dashboard::{gemini_models_payload, models_payload},
+    render_error,
+};
 
 #[handler]
 pub(super) async fn openai_chat(req: &mut Request, depot: &mut Depot, res: &mut Response) {
@@ -139,6 +143,11 @@ async fn handle_model_request(
             // Dump the original client body before any protocol conversion.
             if let Some(session) = dump.as_ref() {
                 session.write_request(client_body.as_ref());
+                // Dump the converted (provider-facing) request when protocol
+                // conversion occurred (provider != entry protocol).
+                if let Some(converted) = &result.converted_request {
+                    session.write_converted_request(converted);
+                }
             }
             if let Err(error) = write_execute_result(
                 res,
@@ -331,6 +340,10 @@ async fn write_execute_result(
                     );
                     error
                 })?;
+            // Dump the converted (client-facing) response body.
+            if let Some(session) = dump.as_ref() {
+                session.write_converted_response_json(&converted);
+            }
             res.render(Json(converted));
             Ok(())
         }
@@ -435,6 +448,9 @@ fn converted_stream(
                                             let mut queue: std::collections::VecDeque<Bytes> =
                                                 out.into_iter().collect();
                                             if let Some(bytes) = queue.pop_front() {
+                                                if let Some(session) = dump.as_ref() {
+                                                    session.append_converted_response_chunk(&bytes);
+                                                }
                                                 return Some((
                                                     Ok(bytes),
                                                     (upstream, parser, converter, queue, finished),
@@ -497,6 +513,9 @@ fn converted_stream(
                                             })
                                             .collect();
                                         if let Some(bytes) = queue.pop_front() {
+                                            if let Some(session) = dump.as_ref() {
+                                                session.append_converted_response_chunk(&bytes);
+                                            }
                                             return Some((
                                                 Ok(bytes),
                                                 (upstream, parser, converter, queue, finished),

@@ -35,6 +35,10 @@ pub struct ExecuteRequest {
 pub struct ExecuteResult {
     pub provider_type: ProviderType,
     pub response: UpstreamResponse,
+    /// The provider-facing request body after protocol conversion
+    /// (output of `prepare_request`). `None` when no conversion was needed
+    /// or for passthrough/image requests.
+    pub converted_request: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -396,6 +400,12 @@ async fn try_target(
             );
             error
         })?;
+    let converted_request = if target.provider_type != request.target {
+        Some(provider_request.clone())
+    } else {
+        None
+    };
+
     let upstream = providers
         .send_request(SendRequest {
             state: Some(state),
@@ -432,6 +442,7 @@ async fn try_target(
     Ok(ExecuteResult {
         provider_type: target.provider_type,
         response: upstream,
+        converted_request,
     })
 }
 
@@ -541,6 +552,7 @@ async fn try_image_target(
     Ok(ExecuteResult {
         provider_type: target.provider_type,
         response,
+        converted_request: None,
     })
 }
 
@@ -649,6 +661,7 @@ mod tests {
                                 body: Bytes::new(),
                                 auth_index: None,
                             },
+                            converted_request: None,
                         })
                     }
                 }

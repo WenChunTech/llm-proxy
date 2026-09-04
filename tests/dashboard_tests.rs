@@ -277,9 +277,11 @@ fn provider_models_endpoint_uses_v1beta_for_gemini_root() {
 
 #[test]
 fn provider_models_endpoint_keeps_v1beta_base_for_gemini() {
-    let endpoint =
-        build_provider_models_endpoint("https://generativelanguage.googleapis.com/v1beta", "gemini")
-            .expect("endpoint");
+    let endpoint = build_provider_models_endpoint(
+        "https://generativelanguage.googleapis.com/v1beta",
+        "gemini",
+    )
+    .expect("endpoint");
     assert_eq!(
         endpoint,
         "https://generativelanguage.googleapis.com/v1beta/models"

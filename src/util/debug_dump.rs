@@ -1,8 +1,17 @@
-//! Per-request debug dump: unconverted request/response bodies under timestamped directories.
+//! Per-request debug dump: raw and converted request/response bodies under timestamped directories.
 //!
-//! Bodies are stored *before* protocol conversion:
+//! Bodies are stored at two stages:
+//! - **Raw (unconverted)**: the original client request and the raw upstream
+//!   response body (provider wire format), before any protocol conversion.
+//! - **Converted**: the provider-facing request body (after protocol
+//!   conversion) and the client-facing response body (after conversion back
+//!   to the entry protocol).
+//!
+//! Files:
 //! - `request.json`: original client request body
+//! - `converted_request.json`: request body after protocol conversion (sent to provider)
 //! - `response.*`: raw upstream response body (provider wire format)
+//! - `converted_response.*`: response body after conversion (sent to client)
 //!
 //! Model / endpoint / provider live in `meta.json`. Directory names are
 //! `{YYYYMMDD_HHMMSS_mmm}` (UTC date + time + milliseconds). Concurrent
@@ -12,9 +21,12 @@
 //! ```text
 //! {dir}/{YYYYMMDD_HHMMSS_mmm}/
 //!   meta.json
-//!   request.json
-//!   response.json   # non-stream upstream body
-//!   response.sse    # stream upstream chunks (as received from provider)
+//!   request.json            # original client request body
+//!   converted_request.json  # converted request sent to provider
+//!   response.json           # non-stream raw upstream body
+//!   response.sse            # stream raw upstream chunks
+//!   converted_response.json # non-stream converted response sent to client
+//!   converted_response.sse  # stream converted chunks sent to client
 //! ```
 
 use std::{
@@ -95,6 +107,11 @@ pub struct DebugDumpSession {
     async_tx: Option<std::sync::mpsc::Sender<Bytes>>,
     response_file: Mutex<Option<File>>,
     response_path: Mutex<Option<PathBuf>>,
+    /// Background writer channel for *converted* response stream chunks
+    /// (client-facing SSE after protocol conversion). Mirrors `async_tx`.
+    async_converted_tx: Option<std::sync::mpsc::Sender<Bytes>>,
+    converted_response_file: Mutex<Option<File>>,
+    converted_response_path: Mutex<Option<PathBuf>>,
 }
 
 impl DebugDumpSession {
@@ -128,41 +145,13 @@ impl DebugDumpSession {
         // Stream chunks are written by a background blocking task so the async
         // streaming loop is not stalled by per-chunk disk I/O. Falls back to
         // inline synchronous writes when no runtime is present (unit tests).
-        let async_tx = match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                let (tx, rx) = std::sync::mpsc::channel::<Bytes>();
-                let writer_path = dir.join("response.sse");
-                handle.spawn_blocking(move || {
-                    let mut file = match OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&writer_path)
-                    {
-                        Ok(file) => file,
-                        Err(error) => {
-                            tracing::warn!(
-                                path = %writer_path.display(),
-                                error = %error,
-                                "failed to open debug dump response stream file"
-                            );
-                            return;
-                        }
-                    };
-                    while let Ok(bytes) = rx.recv() {
-                        if let Err(error) = file.write_all(&bytes) {
-                            tracing::warn!(
-                                path = %writer_path.display(),
-                                error = %error,
-                                "failed to append debug dump response chunk"
-                            );
-                            break;
-                        }
-                    }
-                    let _ = file.flush();
-                });
-                Some(tx)
-            }
-            Err(_) => None,
+        // Two writers: one for raw upstream chunks, one for converted chunks.
+        let (async_tx, async_converted_tx) = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => (
+                spawn_stream_writer(&handle, &dir, "response.sse"),
+                spawn_stream_writer(&handle, &dir, "converted_response.sse"),
+            ),
+            Err(_) => (None, None),
         };
 
         let session = Self {
@@ -177,6 +166,9 @@ impl DebugDumpSession {
             async_tx,
             response_file: Mutex::new(None),
             response_path: Mutex::new(None),
+            async_converted_tx,
+            converted_response_file: Mutex::new(None),
+            converted_response_path: Mutex::new(None),
         };
 
         if let Err(error) = session.write_meta(ctx) {
@@ -246,6 +238,101 @@ impl DebugDumpSession {
             return;
         }
         self.publish_updated();
+    }
+
+    pub fn write_converted_request(&self, body: &Value) {
+        if let Err(error) = write_json_file(&self.dir.join("converted_request.json"), body) {
+            tracing::warn!(
+                dir = %self.dir.display(),
+                error = %error,
+                "failed to write debug dump converted request"
+            );
+            return;
+        }
+        self.publish_updated();
+    }
+
+    pub fn write_converted_response_json(&self, body: &Value) {
+        let path = self.dir.join("converted_response.json");
+        if let Err(error) = write_json_file(&path, body) {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "failed to write debug dump converted response json"
+            );
+            return;
+        }
+        self.publish_updated();
+    }
+
+    pub fn append_converted_response_chunk(&self, chunk: &Bytes) {
+        if chunk.is_empty() {
+            return;
+        }
+        if let Some(tx) = &self.async_converted_tx {
+            let _ = tx.send(chunk.clone());
+        } else {
+            self.write_converted_chunk_sync(chunk);
+        }
+
+        if let Some(hub) = self.hub.as_ref()
+            && hub.receiver_count() > 0
+        {
+            let text = String::from_utf8_lossy(chunk).into_owned();
+            if !text.is_empty() {
+                hub.publish(DumpEvent::Chunk {
+                    id: self.id.clone(),
+                    file: "converted_response.sse".to_string(),
+                    text,
+                });
+            }
+        }
+    }
+
+    /// Inline synchronous write for converted stream chunks (no runtime).
+    fn write_converted_chunk_sync(&self, chunk: &[u8]) {
+        let path = {
+            let mut path_guard = match self.converted_response_path.lock() {
+                Ok(guard) => guard,
+                Err(error) => {
+                    tracing::warn!(error = %error, "debug dump converted response path lock poisoned");
+                    return;
+                }
+            };
+            path_guard
+                .get_or_insert_with(|| self.dir.join("converted_response.sse"))
+                .clone()
+        };
+
+        let mut guard = match self.converted_response_file.lock() {
+            Ok(guard) => guard,
+            Err(error) => {
+                tracing::warn!(error = %error, "debug dump converted response file lock poisoned");
+                return;
+            }
+        };
+        if guard.is_none() {
+            match OpenOptions::new().create(true).append(true).open(&path) {
+                Ok(file) => *guard = Some(file),
+                Err(error) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "failed to open debug dump converted response stream file"
+                    );
+                    return;
+                }
+            }
+        }
+        if let Some(file) = guard.as_mut()
+            && let Err(error) = file.write_all(chunk)
+        {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "failed to append debug dump converted response chunk"
+            );
+        }
     }
 
     pub fn write_error(&self, error: &str) {
@@ -413,6 +500,47 @@ where
     })
 }
 
+/// Spawn a background blocking writer that receives `Bytes` on a channel and
+/// appends them to `dir/file_name`. Returns the sender so async code can feed
+/// chunks without blocking the streaming loop.
+fn spawn_stream_writer(
+    handle: &tokio::runtime::Handle,
+    dir: &Path,
+    file_name: &str,
+) -> Option<std::sync::mpsc::Sender<Bytes>> {
+    let (tx, rx) = std::sync::mpsc::channel::<Bytes>();
+    let writer_path = dir.join(file_name);
+    handle.spawn_blocking(move || {
+        let mut file = match OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&writer_path)
+        {
+            Ok(file) => file,
+            Err(error) => {
+                tracing::warn!(
+                    path = %writer_path.display(),
+                    error = %error,
+                    "failed to open debug dump stream file"
+                );
+                return;
+            }
+        };
+        while let Ok(bytes) = rx.recv() {
+            if let Err(error) = file.write_all(&bytes) {
+                tracing::warn!(
+                    path = %writer_path.display(),
+                    error = %error,
+                    "failed to append debug dump stream chunk"
+                );
+                break;
+            }
+        }
+        let _ = file.flush();
+    });
+    Some(tx)
+}
+
 fn write_json_file(path: &Path, value: &Value) -> std::io::Result<()> {
     let raw = serde_json::to_vec_pretty(value)
         .map_err(|error| std::io::Error::other(error.to_string()))?;
@@ -422,9 +550,12 @@ fn write_json_file(path: &Path, value: &Value) -> std::io::Result<()> {
 const DUMP_FILE_NAMES: &[&str] = &[
     "meta.json",
     "request.json",
+    "converted_request.json",
     "response.json",
     "response.sse",
     "response.bin",
+    "converted_response.json",
+    "converted_response.sse",
     "error.json",
 ];
 
@@ -590,6 +721,9 @@ mod tests {
         assert!(session.dir().join("request.json").is_file());
         assert!(session.dir().join("response.json").is_file());
         assert!(session.dir().join("meta.json").is_file());
+        // Converted files should NOT exist yet (not written in this test).
+        assert!(!session.dir().join("converted_request.json").exists());
+        assert!(!session.dir().join("converted_response.json").exists());
 
         let meta: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(session.dir().join("meta.json")).unwrap())
@@ -643,5 +777,58 @@ mod tests {
         };
         let ctx = DumpContext::new("m", ProviderType::Chat, None, false);
         assert!(DebugDumpSession::begin(&config, &ctx, None).is_none());
+    }
+
+    #[test]
+    fn write_converted_request_and_response_files() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("llm-proxy-debug-dump-conv-{nanos}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let config = DebugDumpConfig {
+            enabled: true,
+            dir: dir.display().to_string(),
+        };
+        let ctx = DumpContext::new(
+            "gpt-4o",
+            ProviderType::Chat,
+            Some(ProviderType::Claude),
+            false,
+        )
+        .with_status(200);
+        let session = DebugDumpSession::begin(&config, &ctx, None).expect("session");
+        session.write_request(&serde_json::json!({"model":"gpt-4o","messages":[]}));
+        session.write_converted_request(
+            &serde_json::json!({"model":"gpt-4o","messages":[],"stream":false}),
+        );
+        session.write_response_json(&serde_json::json!({"id":"resp"}));
+        session.write_converted_response_json(&serde_json::json!({"id":"resp","type":"message"}));
+
+        assert!(session.dir().join("request.json").is_file());
+        assert!(session.dir().join("converted_request.json").is_file());
+        assert!(session.dir().join("response.json").is_file());
+        assert!(session.dir().join("converted_response.json").is_file());
+
+        // Converted request should differ from original (has stream flag).
+        let orig: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(session.dir().join("request.json")).unwrap())
+                .unwrap();
+        let conv: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(session.dir().join("converted_request.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(conv["stream"], false);
+        assert!(orig.get("stream").is_none());
+
+        // list_dump_files should include the new files.
+        let files = list_dump_files(session.dir());
+        assert!(files.contains(&"converted_request.json".to_string()));
+        assert!(files.contains(&"converted_response.json".to_string()));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
