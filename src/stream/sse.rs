@@ -22,27 +22,33 @@ struct PartialEvent {
 
 #[derive(Default)]
 pub struct SseParser {
-    buffer: String,
+    buffer: Vec<u8>,
     current: PartialEvent,
 }
 
 impl SseParser {
+    /// Feed raw transport bytes. Lines are decoded only once their terminating
+    /// `'\n'` has arrived: in valid UTF-8 `0x0A` never appears inside a
+    /// multi-byte sequence, so a character split across chunks can no longer
+    /// break decoding.
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseEvent>, ProxyError> {
-        let text = std::str::from_utf8(bytes).map_err(|err| {
-            ProxyError::StreamParse(format!("invalid utf-8 in SSE stream: {err}"))
-        })?;
-        self.buffer.push_str(text);
+        self.buffer.extend_from_slice(bytes);
 
         let mut events = Vec::new();
         let mut consumed = 0usize;
         // Scan for complete lines without draining per line (avoids a memmove
         // and allocation per line; borrows buffer immutably while mutating the
         // disjoint `current` field).
-        while let Some(rel) = self.buffer[consumed..].find('\n') {
+        while let Some(rel) = self.buffer[consumed..]
+            .iter()
+            .position(|&byte| byte == b'\n')
+        {
             let line_end = consumed + rel;
-            let line = self.buffer[consumed..line_end]
-                .strip_suffix('\r')
-                .unwrap_or(&self.buffer[consumed..line_end]);
+            let raw_line = &self.buffer[consumed..line_end];
+            let raw_line = raw_line.strip_suffix(b"\r").unwrap_or(raw_line);
+            let line = std::str::from_utf8(raw_line).map_err(|err| {
+                ProxyError::StreamParse(format!("invalid utf-8 in SSE stream: {err}"))
+            })?;
             if let Some(event) = Self::push_line(&mut self.current, line)? {
                 events.push(event);
             }
@@ -56,8 +62,12 @@ impl SseParser {
 
     pub fn finish(&mut self) -> Result<Option<SseEvent>, ProxyError> {
         if !self.buffer.is_empty() {
-            let line = std::mem::take(&mut self.buffer);
-            if let Some(event) = Self::push_line(&mut self.current, line.trim_end_matches('\r'))? {
+            // The stream ended without a final newline, so the tail may stop
+            // mid-character; decode it best-effort instead of losing the event.
+            let bytes = std::mem::take(&mut self.buffer);
+            let bytes = bytes.strip_suffix(b"\r").unwrap_or(&bytes);
+            let line = String::from_utf8_lossy(bytes);
+            if let Some(event) = Self::push_line(&mut self.current, &line)? {
                 return Ok(Some(event));
             }
         }
