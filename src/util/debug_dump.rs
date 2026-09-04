@@ -9,9 +9,9 @@
 //!
 //! Files:
 //! - `request.json`: original client request body
-//! - `converted_request.json`: request body after protocol conversion (sent to provider)
+//! - `request.converted.json`: request body after protocol conversion (sent to provider)
 //! - `response.*`: raw upstream response body (provider wire format)
-//! - `converted_response.*`: response body after conversion (sent to client)
+//! - `response.converted.*`: response body after conversion (sent to client)
 //!
 //! Model / endpoint / provider live in `meta.json`. Directory names are
 //! `{YYYYMMDD_HHMMSS_mmm}` (UTC date + time + milliseconds). Concurrent
@@ -22,11 +22,11 @@
 //! {dir}/{YYYYMMDD_HHMMSS_mmm}/
 //!   meta.json
 //!   request.json            # original client request body
-//!   converted_request.json  # converted request sent to provider
+//!   request.converted.json  # converted request sent to provider
 //!   response.json           # non-stream raw upstream body
 //!   response.sse            # stream raw upstream chunks
-//!   converted_response.json # non-stream converted response sent to client
-//!   converted_response.sse  # stream converted chunks sent to client
+//!   response.converted.json # non-stream converted response sent to client
+//!   response.converted.sse  # stream converted chunks sent to client
 //! ```
 
 use std::{
@@ -149,7 +149,7 @@ impl DebugDumpSession {
         let (async_tx, async_converted_tx) = match tokio::runtime::Handle::try_current() {
             Ok(handle) => (
                 spawn_stream_writer(&handle, &dir, "response.sse"),
-                spawn_stream_writer(&handle, &dir, "converted_response.sse"),
+                spawn_stream_writer(&handle, &dir, "response.converted.sse"),
             ),
             Err(_) => (None, None),
         };
@@ -241,7 +241,7 @@ impl DebugDumpSession {
     }
 
     pub fn write_converted_request(&self, body: &Value) {
-        if let Err(error) = write_json_file(&self.dir.join("converted_request.json"), body) {
+        if let Err(error) = write_json_file(&self.dir.join("request.converted.json"), body) {
             tracing::warn!(
                 dir = %self.dir.display(),
                 error = %error,
@@ -253,7 +253,7 @@ impl DebugDumpSession {
     }
 
     pub fn write_converted_response_json(&self, body: &Value) {
-        let path = self.dir.join("converted_response.json");
+        let path = self.dir.join("response.converted.json");
         if let Err(error) = write_json_file(&path, body) {
             tracing::warn!(
                 path = %path.display(),
@@ -282,7 +282,7 @@ impl DebugDumpSession {
             if !text.is_empty() {
                 hub.publish(DumpEvent::Chunk {
                     id: self.id.clone(),
-                    file: "converted_response.sse".to_string(),
+                    file: "response.converted.sse".to_string(),
                     text,
                 });
             }
@@ -300,7 +300,7 @@ impl DebugDumpSession {
                 }
             };
             path_guard
-                .get_or_insert_with(|| self.dir.join("converted_response.sse"))
+                .get_or_insert_with(|| self.dir.join("response.converted.sse"))
                 .clone()
         };
 
@@ -550,12 +550,12 @@ fn write_json_file(path: &Path, value: &Value) -> std::io::Result<()> {
 const DUMP_FILE_NAMES: &[&str] = &[
     "meta.json",
     "request.json",
-    "converted_request.json",
+    "request.converted.json",
     "response.json",
     "response.sse",
     "response.bin",
-    "converted_response.json",
-    "converted_response.sse",
+    "response.converted.json",
+    "response.converted.sse",
     "error.json",
 ];
 
@@ -722,8 +722,8 @@ mod tests {
         assert!(session.dir().join("response.json").is_file());
         assert!(session.dir().join("meta.json").is_file());
         // Converted files should NOT exist yet (not written in this test).
-        assert!(!session.dir().join("converted_request.json").exists());
-        assert!(!session.dir().join("converted_response.json").exists());
+        assert!(!session.dir().join("request.converted.json").exists());
+        assert!(!session.dir().join("response.converted.json").exists());
 
         let meta: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(session.dir().join("meta.json")).unwrap())
@@ -809,16 +809,16 @@ mod tests {
         session.write_converted_response_json(&serde_json::json!({"id":"resp","type":"message"}));
 
         assert!(session.dir().join("request.json").is_file());
-        assert!(session.dir().join("converted_request.json").is_file());
+        assert!(session.dir().join("request.converted.json").is_file());
         assert!(session.dir().join("response.json").is_file());
-        assert!(session.dir().join("converted_response.json").is_file());
+        assert!(session.dir().join("response.converted.json").is_file());
 
         // Converted request should differ from original (has stream flag).
         let orig: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(session.dir().join("request.json")).unwrap())
                 .unwrap();
         let conv: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(session.dir().join("converted_request.json")).unwrap(),
+            &fs::read_to_string(session.dir().join("request.converted.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(conv["stream"], false);
@@ -826,8 +826,8 @@ mod tests {
 
         // list_dump_files should include the new files.
         let files = list_dump_files(session.dir());
-        assert!(files.contains(&"converted_request.json".to_string()));
-        assert!(files.contains(&"converted_response.json".to_string()));
+        assert!(files.contains(&"request.converted.json".to_string()));
+        assert!(files.contains(&"response.converted.json".to_string()));
 
         let _ = fs::remove_dir_all(&dir);
     }
