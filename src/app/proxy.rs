@@ -420,6 +420,9 @@ fn converted_stream(
             let dump = dump.clone();
             async move {
                 if let Some(bytes) = pending.pop_front() {
+                    if let Some(session) = dump.as_ref() {
+                        session.append_converted_response_chunk(&bytes);
+                    }
                     return Some((Ok(bytes), (upstream, parser, converter, pending, finished)));
                 }
                 if finished {
