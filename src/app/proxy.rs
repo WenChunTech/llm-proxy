@@ -132,22 +132,27 @@ async fn handle_model_request(
         forwarded_headers: get_forwardable_request_headers(req.headers()),
     };
 
+    // Create the dump session and persist the original request body BEFORE
+    // sending anything to upstream, so the request is preserved even if the
+    // process crashes during the upstream call.
+    let dump = DebugDumpSession::begin(
+        &snapshot.config.debug_dump,
+        &DumpContext::new(&model, target, None, is_streaming),
+        Some(state.dump_hub.clone()),
+    );
+    if let Some(session) = dump.as_ref() {
+        session.write_request(client_body.as_ref());
+    }
+
     match execute(&state, &snapshot, exec_request).await {
         Ok(result) => {
-            let dump = DebugDumpSession::begin(
-                &snapshot.config.debug_dump,
-                &DumpContext::new(&model, target, Some(result.provider_type), is_streaming)
-                    .with_status(result.response.status()),
-                Some(state.dump_hub.clone()),
-            );
-            // Dump the original client body before any protocol conversion.
+            let attempt_history = result.attempt_history.clone();
             if let Some(session) = dump.as_ref() {
-                session.write_request(client_body.as_ref());
-                // Dump the converted (provider-facing) request when protocol
-                // conversion occurred (provider != entry protocol).
+                session.update_context(Some(result.provider_type), Some(result.response.status()));
                 if let Some(converted) = &result.converted_request {
                     session.write_converted_request(converted);
                 }
+                session.write_attempt_history(&attempt_history);
             }
             if let Err(error) = write_execute_result(
                 res,
@@ -164,12 +169,7 @@ async fn handle_model_request(
             }
         }
         Err(error) => {
-            if let Some(session) = DebugDumpSession::begin(
-                &snapshot.config.debug_dump,
-                &DumpContext::new(&model, target, None, is_streaming),
-                Some(state.dump_hub.clone()),
-            ) {
-                session.write_request(client_body.as_ref());
+            if let Some(session) = dump.as_ref() {
                 session.write_error(&error.to_string());
             }
             render_error(res, error);
@@ -218,16 +218,21 @@ async fn handle_image_generation(req: &mut Request, depot: &mut Depot, res: &mut
         forwarded_headers: get_forwardable_request_headers(req.headers()),
     };
 
+    // Create the dump session and persist the request body BEFORE sending
+    // anything to upstream.
+    let dump = DebugDumpSession::begin(
+        &snapshot.config.debug_dump,
+        &DumpContext::image(&model, None),
+        Some(state.dump_hub.clone()),
+    );
+    if let Some(session) = dump.as_ref() {
+        session.write_request(body.as_ref());
+    }
+
     match execute_image(&state, &snapshot, request).await {
         Ok(result) => {
-            let dump = DebugDumpSession::begin(
-                &snapshot.config.debug_dump,
-                &DumpContext::image(&model, Some(result.provider_type))
-                    .with_status(result.response.status()),
-                Some(state.dump_hub.clone()),
-            );
             if let Some(session) = dump.as_ref() {
-                session.write_request(body.as_ref());
+                session.update_context(Some(result.provider_type), Some(result.response.status()));
             }
             apply_headers(res, result.response.headers());
             res.status_code(
@@ -236,12 +241,7 @@ async fn handle_image_generation(req: &mut Request, depot: &mut Depot, res: &mut
             write_passthrough_response(res, result.response, dump);
         }
         Err(error) => {
-            if let Some(session) = DebugDumpSession::begin(
-                &snapshot.config.debug_dump,
-                &DumpContext::image(&model, None),
-                Some(state.dump_hub.clone()),
-            ) {
-                session.write_request(body.as_ref());
+            if let Some(session) = dump.as_ref() {
                 session.write_error(&error.to_string());
             }
             render_error(res, error);
@@ -315,31 +315,44 @@ async fn write_execute_result(
             }
 
             let raw_response_body = String::from_utf8_lossy(&body).to_string();
-            let json = bytes_to_json(body).map_err(|error| {
-                tracing::debug!(
-                    source_provider = ?result.provider_type,
-                    target_provider = ?target,
-                    model = %model,
-                    error = %error,
-                    raw_response_body = %raw_response_body,
-                    "response JSON parse failed"
-                );
-                error
-            })?;
-            let converted = state
-                .providers
-                .convert_response(result.provider_type, json, target)
-                .map_err(|error| {
+            let json = match bytes_to_json(body) {
+                Ok(json) => json,
+                Err(error) => {
                     tracing::debug!(
                         source_provider = ?result.provider_type,
                         target_provider = ?target,
                         model = %model,
                         error = %error,
                         raw_response_body = %raw_response_body,
-                        "response conversion failed"
+                        "response JSON parse failed"
                     );
-                    error
-                })?;
+                    if let Some(session) = dump.as_ref() {
+                        session.write_error(&error.to_string());
+                    }
+                    return Err(error);
+                }
+            };
+            let converted =
+                match state
+                    .providers
+                    .convert_response(result.provider_type, json, target)
+                {
+                    Ok(converted) => converted,
+                    Err(error) => {
+                        tracing::debug!(
+                            source_provider = ?result.provider_type,
+                            target_provider = ?target,
+                            model = %model,
+                            error = %error,
+                            raw_response_body = %raw_response_body,
+                            "response conversion failed"
+                        );
+                        if let Some(session) = dump.as_ref() {
+                            session.write_error(&error.to_string());
+                        }
+                        return Err(error);
+                    }
+                };
             // Dump the converted (client-facing) response body.
             if let Some(session) = dump.as_ref() {
                 session.write_converted_response_json(&converted);
@@ -468,6 +481,10 @@ fn converted_stream(
                                                 error = %error,
                                                 "stream response conversion failed"
                                             );
+                                            if let Some(session) = dump.as_ref() {
+                                                session.write_error(&error.to_string());
+                                            }
+
                                             return Some((
                                                 Err(std::io::Error::other(error)),
                                                 (upstream, parser, converter, pending, true),
@@ -484,6 +501,10 @@ fn converted_stream(
                                         raw_response_chunk = %String::from_utf8_lossy(&bytes),
                                         "stream response parse failed"
                                     );
+                                    if let Some(session) = dump.as_ref() {
+                                        session.write_error(&error.to_string());
+                                    }
+
                                     return Some((
                                         Err(std::io::Error::other(error)),
                                         (upstream, parser, converter, pending, true),
@@ -499,6 +520,10 @@ fn converted_stream(
                                 error = %error,
                                 "stream upstream read failed"
                             );
+                            if let Some(session) = dump.as_ref() {
+                                session.write_error(&error.to_string());
+                            }
+
                             return Some((
                                 Err(std::io::Error::other(error)),
                                 (upstream, parser, converter, pending, true),
@@ -533,6 +558,10 @@ fn converted_stream(
                                             error = %error,
                                             "stream response conversion failed"
                                         );
+                                        if let Some(session) = dump.as_ref() {
+                                            session.write_error(&error.to_string());
+                                        }
+
                                         return Some((
                                             Err(std::io::Error::other(error)),
                                             (upstream, parser, converter, pending, true),
@@ -548,6 +577,10 @@ fn converted_stream(
                                         error = %error,
                                         "stream response parse failed"
                                     );
+                                    if let Some(session) = dump.as_ref() {
+                                        session.write_error(&error.to_string());
+                                    }
+
                                     return Some((
                                         Err(std::io::Error::other(error)),
                                         (upstream, parser, converter, pending, true),

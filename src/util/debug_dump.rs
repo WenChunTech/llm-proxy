@@ -96,9 +96,9 @@ pub struct DebugDumpSession {
     id: String,
     model: String,
     endpoint: String,
-    provider: String,
+    provider: Mutex<String>,
     is_streaming: bool,
-    status: Option<u16>,
+    status: Mutex<Option<u16>>,
     hub: Option<DumpHub>,
     /// When a Tokio runtime is available, stream chunks are forwarded to a
     /// background blocking writer via this channel so the async streaming loop
@@ -159,9 +159,9 @@ impl DebugDumpSession {
             id,
             model: ctx.model.clone(),
             endpoint: ctx.endpoint.clone(),
-            provider: ctx.provider.clone(),
+            provider: Mutex::new(ctx.provider.clone()),
             is_streaming: ctx.is_streaming,
-            status: ctx.status,
+            status: Mutex::new(ctx.status),
             hub,
             async_tx,
             response_file: Mutex::new(None),
@@ -185,7 +185,6 @@ impl DebugDumpSession {
             dir = %dir.display(),
             model = %ctx.model,
             endpoint = %ctx.endpoint,
-            provider = %ctx.provider,
             is_streaming = ctx.is_streaming,
             "debug dump session created"
         );
@@ -195,6 +194,47 @@ impl DebugDumpSession {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// Update the provider and status after the session has been created.
+    /// Re-writes `meta.json` so the dump directory reflects the final
+    /// provider that handled the request and the upstream status code.
+    pub fn update_context(&self, provider: Option<ProviderType>, status: Option<u16>) {
+        let provider_str = {
+            let mut guard = match self.provider.lock() {
+                Ok(g) => g,
+                Err(e) => e.into_inner(),
+            };
+            if let Some(provider) = provider {
+                *guard = provider.as_str().to_string();
+            }
+            guard.clone()
+        };
+        let status_val = {
+            let mut guard = match self.status.lock() {
+                Ok(g) => g,
+                Err(e) => e.into_inner(),
+            };
+            if let Some(status) = status {
+                *guard = Some(status);
+            }
+            *guard
+        };
+        let ctx = DumpContext {
+            model: self.model.clone(),
+            endpoint: self.endpoint.clone(),
+            provider: provider_str,
+            is_streaming: self.is_streaming,
+            status: status_val,
+        };
+        if let Err(error) = self.write_meta(&ctx) {
+            tracing::warn!(
+                dir = %self.dir.display(),
+                error = %error,
+                "failed to update debug dump meta"
+            );
+        }
+        self.publish_updated();
     }
 
     pub fn write_request(&self, body: &Value) {
@@ -348,6 +388,26 @@ impl DebugDumpSession {
         self.publish_updated();
     }
 
+    /// Write the full provider attempt history (one entry per provider tried,
+    /// including non-success responses and errors).  Useful for diagnosing
+    /// multi-provider fallback chains where every provider returned an error.
+    pub fn write_attempt_history<T: serde::Serialize>(&self, attempts: &[T]) {
+        if attempts.is_empty() {
+            return;
+        }
+        let path = self.dir.join("attempts.json");
+        let payload = serde_json::json!({ "attempts": attempts });
+        if let Err(io_error) = write_json_file(&path, &payload) {
+            tracing::warn!(
+                path = %path.display(),
+                error = %io_error,
+                "failed to write debug dump attempt history"
+            );
+            return;
+        }
+        self.publish_updated();
+    }
+
     pub fn append_response_chunk(&self, chunk: &Bytes) {
         if chunk.is_empty() {
             return;
@@ -433,13 +493,18 @@ impl DebugDumpSession {
         let Some(hub) = self.hub.as_ref() else {
             return;
         };
+        let provider = self
+            .provider
+            .lock()
+            .map_or_else(|e| e.into_inner().clone(), |g| g.clone());
+        let status = self.status.lock().map_or_else(|e| *e.into_inner(), |g| *g);
         hub.publish(DumpEvent::Created {
             id: self.id.clone(),
             model: self.model.clone(),
             endpoint: self.endpoint.clone(),
-            provider: self.provider.clone(),
+            provider,
             is_streaming: self.is_streaming,
-            status: self.status,
+            status,
             files: self.list_files(),
         });
     }
@@ -448,13 +513,18 @@ impl DebugDumpSession {
         let Some(hub) = self.hub.as_ref() else {
             return;
         };
+        let provider = self
+            .provider
+            .lock()
+            .map_or_else(|e| e.into_inner().clone(), |g| g.clone());
+        let status = self.status.lock().map_or_else(|e| *e.into_inner(), |g| *g);
         hub.publish(DumpEvent::Updated {
             id: self.id.clone(),
             model: self.model.clone(),
             endpoint: self.endpoint.clone(),
-            provider: self.provider.clone(),
+            provider,
             is_streaming: self.is_streaming,
-            status: self.status,
+            status,
             files: self.list_files(),
         });
     }
@@ -557,6 +627,7 @@ const DUMP_FILE_NAMES: &[&str] = &[
     "response.converted.json",
     "response.converted.sse",
     "error.json",
+    "attempts.json",
 ];
 
 pub fn is_allowed_dump_file(name: &str) -> bool {
@@ -828,6 +899,81 @@ mod tests {
         let files = list_dump_files(session.dir());
         assert!(files.contains(&"request.converted.json".to_string()));
         assert!(files.contains(&"response.converted.json".to_string()));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_attempt_history_persisted_to_file() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("llm-proxy-debug-dump-attempts-{nanos}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let config = DebugDumpConfig {
+            enabled: true,
+            dir: dir.display().to_string(),
+        };
+        let ctx = DumpContext::new(
+            "glm-5.2",
+            ProviderType::Responses,
+            Some(ProviderType::Chat),
+            true,
+        )
+        .with_status(400);
+        let session = DebugDumpSession::begin(&config, &ctx, None).expect("session");
+        session.write_request(&serde_json::json!({"model":"glm-5.2","messages":[]}));
+
+        // Simulate three failed provider attempts (matching the real-world
+        // scenario where every provider returns a 400).
+        let attempts = vec![
+            serde_json::json!({
+                "provider_type": "openai_responses",
+                "provider_index": 0,
+                "config_index": 3,
+                "base_url": "https://new.xkool.cfd/v1",
+                "status": 400,
+                "response_body": r#"{"error":{"message":"missing required field name"}}"#,
+                "error": null,
+            }),
+            serde_json::json!({
+                "provider_type": "claude",
+                "provider_index": 1,
+                "config_index": 9,
+                "base_url": "https://token.sensenova.cn",
+                "status": 400,
+                "response_body": r#"{"type":"error","error":{"type":"invalid_request_error"}}"#,
+                "error": null,
+            }),
+            serde_json::json!({
+                "provider_type": "openai_chat",
+                "provider_index": 2,
+                "config_index": 0,
+                "base_url": "https://token.sensenova.cn/v1",
+                "status": 400,
+                "response_body": r#"{"error":{"message":"invalid tool_call function"}}"#,
+                "error": null,
+            }),
+        ];
+        session.write_attempt_history(&attempts);
+
+        let path = session.dir().join("attempts.json");
+        assert!(path.is_file(), "attempts.json should exist");
+
+        let payload: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(payload["attempts"].as_array().unwrap().len(), 3);
+        assert_eq!(payload["attempts"][0]["provider_type"], "openai_responses");
+        assert_eq!(payload["attempts"][1]["provider_type"], "claude");
+        assert_eq!(payload["attempts"][2]["provider_type"], "openai_chat");
+        assert_eq!(payload["attempts"][2]["status"], 400);
+
+        // list_dump_files should include attempts.json.
+        let files = list_dump_files(session.dir());
+        assert!(files.contains(&"attempts.json".to_string()));
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -39,6 +39,23 @@ pub struct ExecuteResult {
     /// (output of `prepare_request`). `None` when no conversion was needed
     /// or for passthrough/image requests.
     pub converted_request: Option<Value>,
+    /// Records of every provider attempt (including the final one),
+    /// useful for debug dumps when all providers fail.
+    pub attempt_history: Vec<AttemptRecord>,
+}
+
+/// A snapshot of a single provider attempt within the retry loop.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AttemptRecord {
+    pub provider_type: ProviderType,
+    pub provider_index: usize,
+    pub config_index: usize,
+    pub base_url: Option<String>,
+    pub status: Option<u16>,
+    /// Raw upstream response body (available for non-stream responses).
+    pub response_body: Option<String>,
+    /// Error message when the attempt itself failed (not a non-success HTTP response).
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +85,7 @@ pub async fn execute(
 
     let mut last_result: Option<ExecuteResult> = None;
     let mut last_error: Option<ProxyError> = None;
+    let mut attempt_history: Vec<AttemptRecord> = Vec::new();
 
     for (model_index, model) in models.iter().enumerate() {
         if model_index > 0 {
@@ -94,17 +112,20 @@ pub async fn execute(
 
         // Each model gets an independent attempt budget so fallback models are not
         // starved after the primary model exhausts its coverage/max_retries.
-        if let Some(result) =
+        if let Some(mut result) =
             execute_single_model(state, snapshot, &request, model, &mut last_error).await?
         {
             if result.response.is_success() {
                 return Ok(result);
             }
+            attempt_history.append(&mut result.attempt_history);
             last_result = Some(result);
         }
     }
 
     if let Some(result) = last_result {
+        let mut result = result;
+        result.attempt_history = attempt_history;
         return Ok(result);
     }
     if let Some(error) = last_error {
@@ -156,9 +177,13 @@ pub async fn execute_image(
     {
         AttemptLoopResult::Success(result) => Ok(result),
         AttemptLoopResult::Exhausted {
-            last_result: Some(result),
+            last_result: Some(mut result),
+            attempt_history,
             ..
-        } => Ok(result),
+        } => {
+            result.attempt_history = attempt_history;
+            Ok(result)
+        }
         AttemptLoopResult::Exhausted {
             last_error: Some(error),
             ..
@@ -173,6 +198,7 @@ enum AttemptLoopResult {
     Exhausted {
         last_result: Option<ExecuteResult>,
         last_error: Option<ProxyError>,
+        attempt_history: Vec<AttemptRecord>,
     },
 }
 
@@ -191,6 +217,7 @@ where
 {
     let mut last_result = None;
     let mut last_error = None;
+    let mut attempt_history: Vec<AttemptRecord> = Vec::new();
     let mut target_attempts: HashMap<ProviderCursor, usize> = HashMap::new();
     // Shared attempt loop for every provider type (OpenAI/Claude/Gemini/Codex/Grok).
     // Budget always covers every target/credential once; max_retries only raises it.
@@ -245,6 +272,15 @@ where
                         response_body = %result.response.body_text().unwrap_or_default(),
                         "{log_label} provider returned non-success"
                     );
+                    attempt_history.push(AttemptRecord {
+                        provider_type: target.provider_type,
+                        provider_index: target.provider_index,
+                        config_index: target.config_index,
+                        base_url: Some(config_base_url(&target.config).to_string()),
+                        status: Some(result.response.status()),
+                        response_body: result.response.body_text(),
+                        error: None,
+                    });
                     last_result = Some(result);
                 }
                 Err(error) => {
@@ -257,6 +293,15 @@ where
                         error = %error,
                         "{log_label} provider attempt failed"
                     );
+                    attempt_history.push(AttemptRecord {
+                        provider_type: target.provider_type,
+                        provider_index: target.provider_index,
+                        config_index: target.config_index,
+                        base_url: Some(config_base_url(&target.config).to_string()),
+                        status: error.upstream_status_code().map(|s| s.as_u16()),
+                        response_body: None,
+                        error: Some(error.to_string()),
+                    });
                     last_error = Some(error);
                 }
             }
@@ -280,6 +325,7 @@ where
     Ok(AttemptLoopResult::Exhausted {
         last_result,
         last_error,
+        attempt_history,
     })
 }
 
@@ -348,11 +394,17 @@ async fn execute_single_model(
         AttemptLoopResult::Exhausted {
             last_result,
             last_error: exhausted_error,
+            attempt_history,
         } => {
             if let Some(error) = exhausted_error {
                 *last_error = Some(error);
             }
-            Ok(last_result)
+            if let Some(mut result) = last_result {
+                result.attempt_history = attempt_history;
+                Ok(Some(result))
+            } else {
+                Ok(None)
+            }
         }
     }
 }
@@ -443,6 +495,7 @@ async fn try_target(
         provider_type: target.provider_type,
         response: upstream,
         converted_request,
+        attempt_history: Vec::new(),
     })
 }
 
@@ -553,6 +606,7 @@ async fn try_image_target(
         provider_type: target.provider_type,
         response,
         converted_request: None,
+        attempt_history: Vec::new(),
     })
 }
 
@@ -662,6 +716,7 @@ mod tests {
                                 auth_index: None,
                             },
                             converted_request: None,
+                            attempt_history: Vec::new(),
                         })
                     }
                 }
