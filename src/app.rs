@@ -58,12 +58,20 @@ pub fn router(state: AppState) -> Router {
                 .push(Router::with_path("logs/ws").goal(dashboard::api_logs_ws))
                 .push(Router::with_path("debug-dumps").get(dashboard::api_debug_dumps))
                 .push(
+                    Router::with_path("debug-dumps/archive")
+                        .get(dashboard::api_debug_dumps_archive),
+                )
+                .push(
                     Router::with_path("debug-dumps/delete").post(dashboard::api_debug_dumps_delete),
                 )
                 .push(
                     Router::with_path("debug-dumps/{id}")
                         .get(dashboard::api_debug_dump_detail)
                         .delete(dashboard::api_debug_dump_delete),
+                )
+                .push(
+                    Router::with_path("debug-dumps/{id}/archive")
+                        .get(dashboard::api_debug_dump_archive),
                 )
                 .push(
                     Router::with_path("debug-dumps/{id}/files/{file}")

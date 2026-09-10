@@ -2,6 +2,7 @@
 
 use std::{
     fs,
+    io::{Cursor, Write},
     path::{Path, PathBuf},
 };
 
@@ -12,6 +13,8 @@ use salvo::websocket::{Message, WebSocketUpgrade};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
+
+use zip::write::SimpleFileOptions;
 
 use crate::{
     error::ProxyError,
@@ -163,6 +166,62 @@ pub(in crate::app) async fn api_debug_dump_file(
                 res.headers_mut().insert(header::CONTENT_DISPOSITION, value);
             }
             res.body(bytes);
+        }
+        Ok(Err(error)) | Err(error) => render_error(res, error),
+    }
+}
+
+/// Download the entire debug-dump directory as a zip archive.
+#[handler]
+pub(in crate::app) async fn api_debug_dumps_archive(depot: &mut Depot, res: &mut Response) {
+    let Some(state) = state_from_depot(depot).ok() else {
+        render_error(res, ProxyError::Config("missing app state".to_string()));
+        return;
+    };
+    let snapshot = state.snapshot().await;
+    let base = dump_base_dir(&snapshot.config.debug_dump);
+    let result = tokio::task::spawn_blocking(move || zip_dump_directory(&base, None))
+        .await
+        .map_err(|err| ProxyError::Config(format!("dump archive task failed: {err}")));
+    match result {
+        Ok(Ok(bytes)) => {
+            set_zip_response(res, "debug-dumps.zip", bytes);
+        }
+        Ok(Err(error)) | Err(error) => render_error(res, error),
+    }
+}
+
+/// Download a single dump session directory as a zip archive.
+#[handler]
+pub(in crate::app) async fn api_debug_dump_archive(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) {
+    let Some(state) = state_from_depot(depot).ok() else {
+        render_error(res, ProxyError::Config("missing app state".to_string()));
+        return;
+    };
+    let Some(id) = req.param::<String>("id") else {
+        render_error(
+            res,
+            ProxyError::InvalidRequest("missing dump id".to_string()),
+        );
+        return;
+    };
+    let snapshot = state.snapshot().await;
+    let base = dump_base_dir(&snapshot.config.debug_dump);
+    let id_for_task = id.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let dir = resolve_dump_dir(&base, &id_for_task)?;
+        zip_dump_directory(&dir, Some(&id_for_task))
+    })
+    .await
+    .map_err(|err| ProxyError::Config(format!("dump archive task failed: {err}")));
+    match result {
+        Ok(Ok(bytes)) => {
+            let filename = format!("{id}.zip");
+            set_zip_response(res, &filename, bytes);
         }
         Ok(Err(error)) | Err(error) => render_error(res, error),
     }
@@ -638,6 +697,108 @@ fn read_dump_file_bytes(
         ProxyError::Config(format!("failed to read {}: {error}", path.display()))
     })?;
     Ok((path, bytes))
+}
+
+/// Build a zip archive from a dump directory tree.
+///
+/// When `prefix` is `Some(id)`, only the session sub-directory `base` is zipped
+/// with file paths relative to the session root. When `prefix` is `None`, the
+/// entire `base` directory is zipped with each session id as a top-level folder.
+fn zip_dump_directory(base: &Path, prefix: Option<&str>) -> Result<Vec<u8>, ProxyError> {
+    if !base.is_dir() {
+        return Err(ProxyError::InvalidRequest(format!(
+            "dump directory not found: {}",
+            base.display()
+        )));
+    }
+
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+        match prefix {
+            Some(_) => {
+                for name in list_dump_files(base) {
+                    let path = base.join(&name);
+                    if path.is_file() {
+                        let bytes = fs::read(&path).map_err(|error| {
+                            ProxyError::Config(format!(
+                                "failed to read {}: {error}",
+                                path.display()
+                            ))
+                        })?;
+                        zip.start_file(&name, options)
+                            .map_err(|error| ProxyError::Config(format!("zip error: {error}")))?;
+                        zip.write_all(&bytes)
+                            .map_err(|error| ProxyError::Config(format!("zip error: {error}")))?;
+                    }
+                }
+            }
+            None => {
+                let entries = fs::read_dir(base).map_err(|error| {
+                    ProxyError::Config(format!(
+                        "failed to read dump dir {}: {error}",
+                        base.display()
+                    ))
+                })?;
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    let Some(id) = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(str::to_string)
+                    else {
+                        continue;
+                    };
+                    if !is_safe_id(&id) {
+                        continue;
+                    }
+                    for name in list_dump_files(&path) {
+                        let file_path = path.join(&name);
+                        if file_path.is_file() {
+                            let bytes = fs::read(&file_path).map_err(|error| {
+                                ProxyError::Config(format!(
+                                    "failed to read {}: {error}",
+                                    file_path.display()
+                                ))
+                            })?;
+                            let archive_path = format!("{id}/{name}");
+                            zip.start_file(&archive_path, options).map_err(|error| {
+                                ProxyError::Config(format!("zip error: {error}"))
+                            })?;
+                            zip.write_all(&bytes).map_err(|error| {
+                                ProxyError::Config(format!("zip error: {error}"))
+                            })?;
+                        }
+                    }
+                }
+            }
+        }
+
+        zip.finish()
+            .map_err(|error| ProxyError::Config(format!("zip finalize error: {error}")))?;
+    }
+
+    Ok(buf.into_inner())
+}
+
+fn set_zip_response(res: &mut Response, filename: &str, bytes: Vec<u8>) {
+    res.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/zip"),
+    );
+    if let Ok(value) = HeaderValue::from_str(&format!(
+        "attachment; filename=\"{}\"",
+        filename.replace('"', "")
+    )) {
+        res.headers_mut().insert(header::CONTENT_DISPOSITION, value);
+    }
+    res.body(bytes);
 }
 
 fn file_language(name: &str) -> &'static str {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { apiAuthHeaders } from '../../lib/api'
-import { downloadText } from '../../lib/browser'
+import { downloadBlob, downloadText } from '../../lib/browser'
 import type { DebugDumpConfig } from '../../types/domain'
 import { DumpViewer } from './DumpViewer'
 import { LoggingSettings } from './LoggingSettings'
@@ -51,6 +51,7 @@ export function LogsView({
   const [loadingList, setLoadingList] = useState(false)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [archiving, setArchiving] = useState(false)
   const [listError, setListError] = useState('')
   const [actionHint, setActionHint] = useState('')
   const [pendingDelete, setPendingDelete] = useState<{ key: string; message: string } | null>(null)
@@ -115,6 +116,23 @@ export function LogsView({
       setActionHint((current) => (current === message ? '' : current))
     }, 2200)
   }, [])
+
+  const downloadArchive = useCallback(async () => {
+    setArchiving(true)
+    try {
+      const response = await fetch('/api/debug-dumps/archive', {
+        headers: apiAuthHeaders(accessKey),
+        signal: AbortSignal.timeout(120000),
+      })
+      if (!response.ok) throw new Error(await response.text())
+      const blob = await response.blob()
+      downloadBlob('debug-dumps.zip', blob)
+    } catch {
+      showActionHint('下载压缩包失败')
+    } finally {
+      setArchiving(false)
+    }
+  }, [accessKey, showActionHint])
 
   const loadList = useCallback(async (query = debouncedFilter) => {
     if (!dumpEnabled) {
@@ -434,6 +452,15 @@ export function LogsView({
                   placeholder="搜索：模型 / 提供商 / 请求体 / 响应体"
                 />
               </label>
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={loadingList || deleting || archiving || !items.length}
+                onClick={() => void downloadArchive()}
+              >
+                <Icon name="download" size={15} />
+                下载压缩包
+              </button>
               <button
                 className="button button-secondary"
                 type="button"
