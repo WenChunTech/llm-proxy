@@ -1,9 +1,11 @@
 //! Grok (xAI) request dialect rewrite.
 //!
 //! Grok speaks its own native wire protocol (see `converter::models::grok`).
-//! The only dialect adjustment the proxy applies is injecting a bare `x_search`
-//! tool when the client already sent a `tools` array, so Grok can search X
-//! alongside the client-provided tools.
+//! The proxy applies two dialect adjustments:
+//! - strip `input` items that carry empty identifiers (`function_call` with
+//!   empty `call_id`/`name`, `function_call_output` with empty `call_id`);
+//! - inject a bare `x_search` tool when the client already sent a `tools`
+//!   array, so Grok can search X alongside client-provided tools.
 //!
 //! See https://docs.x.ai/developers/tools/x-search
 
@@ -11,10 +13,11 @@ use serde_json::{Value, json};
 
 use crate::error::ProxyError;
 
-use super::helpers::tools_array_mut;
+use super::helpers::{filter_empty_input_items, tools_array_mut};
 
-/// Grok dialect: ensure a bare `x_search` tool is present when tools are sent.
+/// Grok dialect: strip empty-identifier input items and ensure `x_search`.
 pub(super) fn rewrite(mut body: Value) -> Result<Value, ProxyError> {
+    filter_empty_input_items(&mut body)?;
     ensure_x_search_tool(&mut body)?;
     Ok(body)
 }

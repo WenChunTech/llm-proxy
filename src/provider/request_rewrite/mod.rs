@@ -13,6 +13,7 @@ mod chat;
 mod codex;
 mod grok;
 mod helpers;
+mod responses;
 
 use serde_json::Value;
 
@@ -46,7 +47,7 @@ fn profile_for(provider: ProviderType) -> ProviderRequestProfile {
         },
         ProviderType::Responses => ProviderRequestProfile {
             wire: ProviderType::Responses,
-            rewrite: None,
+            rewrite: Some(responses::rewrite),
             compat: None,
             sets_stream: true,
         },

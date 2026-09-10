@@ -16,7 +16,6 @@ fn profiles_expose_wire_and_rewrite_flags() {
     assert!(has_rewrite(ProviderType::Grok));
     assert!(has_rewrite(ProviderType::Codex));
     assert!(!has_rewrite(ProviderType::Gemini));
-    assert!(!has_rewrite(ProviderType::Responses));
     assert!(!has_rewrite(ProviderType::Chat));
     assert!(!has_rewrite(ProviderType::Claude));
 }
@@ -341,4 +340,162 @@ fn chat_normalize_is_safe_without_messages_array() {
         .expect("prepare_request");
     assert_eq!(out["prompt"], "hi");
     assert_eq!(out["stream"], false);
+}
+
+// ---------------------------------------------------------------------------
+// Empty-identifier input filtering (function_call / function_call_output)
+// ---------------------------------------------------------------------------
+
+fn function_call_item(call_id: &str, name: &str) -> Value {
+    json!({
+        "type": "function_call",
+        "call_id": call_id,
+        "name": name,
+        "arguments": "{}",
+        "id": "fc_test"
+    })
+}
+
+fn function_call_output_item(call_id: &str) -> Value {
+    json!({
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": "result",
+        "id": "fco_test"
+    })
+}
+
+#[test]
+fn responses_rewrite_strips_function_call_with_empty_call_id() {
+    let body = json!({
+        "model": "gpt",
+        "input": [
+            {"role": "user", "content": "hi"},
+            function_call_item("", "do_thing"),
+            function_call_item("call_1", "do_thing")
+        ]
+    });
+
+    let out = rewrite_request(ProviderType::Responses, body).unwrap();
+    let input = out["input"].as_array().unwrap();
+    assert_eq!(input.len(), 2);
+    assert_eq!(input[0]["role"], "user");
+    assert_eq!(input[1]["call_id"], "call_1");
+}
+
+#[test]
+fn responses_rewrite_strips_function_call_with_empty_name() {
+    let body = json!({
+        "model": "gpt",
+        "input": [
+            function_call_item("call_1", ""),
+            function_call_item("call_2", "do_thing")
+        ]
+    });
+
+    let out = rewrite_request(ProviderType::Responses, body).unwrap();
+    let input = out["input"].as_array().unwrap();
+    assert_eq!(input.len(), 1);
+    assert_eq!(input[0]["call_id"], "call_2");
+    assert_eq!(input[0]["name"], "do_thing");
+}
+
+#[test]
+fn responses_rewrite_strips_function_call_output_with_empty_call_id() {
+    let body = json!({
+        "model": "gpt",
+        "input": [
+            function_call_output_item(""),
+            function_call_output_item("call_1")
+        ]
+    });
+
+    let out = rewrite_request(ProviderType::Responses, body).unwrap();
+    let input = out["input"].as_array().unwrap();
+    assert_eq!(input.len(), 1);
+    assert_eq!(input[0]["call_id"], "call_1");
+}
+
+#[test]
+fn responses_rewrite_preserves_valid_function_items() {
+    let body = json!({
+        "model": "gpt",
+        "input": [
+            {"role": "user", "content": "hi"},
+            function_call_item("call_1", "do_thing"),
+            function_call_output_item("call_1")
+        ]
+    });
+
+    let out = rewrite_request(ProviderType::Responses, body.clone()).unwrap();
+    assert_eq!(out["input"], body["input"]);
+}
+
+#[test]
+fn responses_rewrite_strips_function_call_with_missing_call_id() {
+    let body = json!({
+        "model": "gpt",
+        "input": [
+            {
+                "type": "function_call",
+                "name": "do_thing",
+                "arguments": "{}"
+            },
+            function_call_item("call_1", "do_thing")
+        ]
+    });
+
+    let out = rewrite_request(ProviderType::Responses, body).unwrap();
+    let input = out["input"].as_array().unwrap();
+    assert_eq!(input.len(), 1);
+    assert_eq!(input[0]["call_id"], "call_1");
+}
+
+#[test]
+fn grok_rewrite_strips_empty_identifier_function_items() {
+    let body = json!({
+        "model": "grok-4.5",
+        "input": [
+            {"role": "user", "content": "hi"},
+            function_call_item("", ""),
+            function_call_output_item("")
+        ],
+        "tools": [{"type": "function", "name": "echo", "parameters": {"type": "object"}}]
+    });
+
+    let out = rewrite_request(ProviderType::Grok, body).unwrap();
+    let input = out["input"].as_array().unwrap();
+    assert_eq!(input.len(), 1);
+    assert_eq!(input[0]["role"], "user");
+    // x_search still injected
+    let tools = out["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 2);
+    assert_eq!(tools[1]["type"], "x_search");
+}
+
+#[test]
+fn codex_rewrite_strips_empty_identifier_function_items() {
+    let body = json!({
+        "model": "codex",
+        "input": [
+            {"role": "user", "content": "hi"},
+            function_call_item("", "do_thing"),
+            function_call_output_item("")
+        ],
+        "tools": [{"type": "function", "name": "echo", "parameters": {"type": "object"}}]
+    });
+
+    let out = rewrite_request(ProviderType::Codex, body).unwrap();
+    let input = out["input"].as_array().unwrap();
+    assert_eq!(input.len(), 1);
+    assert_eq!(input[0]["role"], "user");
+    assert_eq!(out["store"], false);
+    assert!(out.get("temperature").is_none());
+}
+
+#[test]
+fn responses_rewrite_safe_without_input_array() {
+    let body = json!({"model": "gpt", "prompt": "hi"});
+    let out = rewrite_request(ProviderType::Responses, body.clone()).unwrap();
+    assert_eq!(out, body);
 }
