@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n'
 import {
   authValueDisabled,
   matchesAuthValidationFilter,
@@ -116,10 +117,10 @@ export function authValidationFilterOptions(results: ReturnType<typeof visibleAu
   const count = (filter: AuthValidationFilter) =>
     results.filter((result) => matchesAuthValidationFilter(result, filter)).length
   return [
-    { value: 'all', label: '全部', count: results.length },
-    { value: 'ok', label: '有效', count: count('ok') },
-    { value: 'invalid', label: '无效', count: count('invalid') },
-    { value: 'rate_limited', label: '限流', count: count('rate_limited') },
-    { value: 'disabled', label: '禁用', count: count('disabled') },
+    { value: 'all', label: t('filter.all'), count: results.length },
+    { value: 'ok', label: t('filter.ok'), count: count('ok') },
+    { value: 'invalid', label: t('filter.invalid'), count: count('invalid') },
+    { value: 'rate_limited', label: t('filter.rate_limited'), count: count('rate_limited') },
+    { value: 'disabled', label: t('filter.disabled'), count: count('disabled') },
   ] satisfies Array<{ value: AuthValidationFilter; label: string; count: number }>
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../../components/Icon'
+import { useI18n } from '../../lib/i18n'
 
 export function ApiKeyModal({
   apiKey,
@@ -10,6 +11,7 @@ export function ApiKeyModal({
   onClose: () => void
   onSubmit: (apiKey: string) => void
 }) {
+  const { t } = useI18n()
   const [value, setValue] = useState(apiKey)
 
   useEffect(() => {
@@ -26,10 +28,10 @@ export function ApiKeyModal({
       <form className="modal auth-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-heading">
           <div>
-            <span className="eyebrow">DASHBOARD ACCESS</span>
-            <h2>修改 API Key</h2>
+            <span className="eyebrow">{t('auth.dashboardAccess')}</span>
+            <h2>{t('apiKey.title')}</h2>
           </div>
-          <button className="icon-button" type="button" title="关闭" onClick={onClose}>
+          <button className="icon-button" type="button" title={t('apiKey.close')} onClick={onClose}>
             ×
           </button>
         </div>
@@ -40,16 +42,16 @@ export function ApiKeyModal({
             type="password"
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            placeholder="输入新的 API Key"
+            placeholder={t('apiKey.placeholder')}
           />
         </label>
         <div className="modal-actions">
           <button className="button button-secondary" type="button" onClick={onClose}>
-            取消
+            {t('apiKey.cancel')}
           </button>
           <button className="button button-primary" type="submit">
             <Icon name="check" size={16} />
-            保存 API Key
+            {t('apiKey.save')}
           </button>
         </div>
       </form>

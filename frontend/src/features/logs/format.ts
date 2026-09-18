@@ -1,3 +1,5 @@
+import { t } from '../../lib/i18n'
+
 export const LOG_LEVEL_OPTIONS = [
   { value: 'error', label: 'error' },
   { value: 'warn', label: 'warn' },
@@ -64,8 +66,8 @@ export function scrollNode(node: HTMLElement | null, position: 'top' | 'bottom')
 }
 
 export function connectionLabel(connection: 'connecting' | 'open' | 'closed' | 'error') {
-  if (connection === 'open') return '实时连接'
-  if (connection === 'connecting') return '连接中…'
-  if (connection === 'error') return '连接错误'
-  return '已断开，重连中…'
+  if (connection === 'open') return t('conn.open')
+  if (connection === 'connecting') return t('conn.connecting')
+  if (connection === 'error') return t('conn.error')
+  return t('conn.closed')
 }

@@ -1,5 +1,6 @@
 import { useMemo, useRef } from 'react'
 import { Icon } from '../../components/Icon'
+import { useI18n } from '../../lib/i18n'
 import { apiAuthHeaders } from '../../lib/api'
 import { copyText, downloadText } from '../../lib/browser'
 import {
@@ -59,6 +60,7 @@ export function DumpViewer({
   onReloadDetail: (id: string) => void
   onCopyHint: (value: string) => void
 }) {
+  const { t } = useI18n()
   const dumpCodeRef = useRef<HTMLPreElement | null>(null)
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
   const allSelected = items.length > 0 && items.every((item) => selectedSet.has(item.id))
@@ -85,10 +87,10 @@ export function DumpViewer({
     if (!activeFile) return
     try {
       await copyText(activeFile.content)
-      onCopyHint('已复制到剪贴板')
+      onCopyHint(t('dump.copiedToClipboard'))
       window.setTimeout(() => onCopyHint(''), 1800)
     } catch {
-      onCopyHint('复制失败')
+      onCopyHint(t('dump.copyFailed'))
       window.setTimeout(() => onCopyHint(''), 1800)
     }
   }
@@ -131,7 +133,7 @@ export function DumpViewer({
       <aside className="dump-list panel">
         <div className="dump-list-heading">
           <div className="dump-list-heading-left">
-            <label className="dump-select-all" title={allSelected ? '取消全选' : '全选当前列表'}>
+            <label className="dump-select-all" title={allSelected ? t('dump.deselectAll') : t('dump.selectAll')}>
               <input
                 type="checkbox"
                 checked={allSelected}
@@ -141,7 +143,7 @@ export function DumpViewer({
                 onChange={onToggleSelectAll}
                 disabled={!items.length || deleting}
               />
-              <strong>会话列表</strong>
+              <strong>{t('dump.sessionList')}</strong>
             </label>
           </div>
           <span>
@@ -149,13 +151,13 @@ export function DumpViewer({
             {items.length}
           </span>
         </div>
-        {loadingList && <div className="dump-empty">加载中…</div>}
+        {loadingList && <div className="dump-empty">{t('dump.loading')}</div>}
         {!loadingList && listError && <div className="dump-empty is-error">{listError}</div>}
         {!loadingList && !listError && !items.length && (
           <div className="dump-empty">
             {listFilter.trim()
-              ? '没有匹配的请求转储。可尝试其他关键字（模型 / 请求体 / 响应体）。'
-              : '暂无请求转储。发起一次代理请求后会出现在这里。'}
+              ? t('dump.noMatchFiltered')
+              : t('dump.noDumps')}
           </div>
         )}
         <div className="dump-list-scroll">
@@ -192,7 +194,7 @@ export function DumpViewer({
                   <div className="dump-list-item-id">{formatDumpTime(item.id, item.mtime_ms)}</div>
                   {item.matches && item.matches.length > 0 && (
                     <div className="dump-list-item-matches" title={item.matches.join(', ')}>
-                      匹配：{item.matches.slice(0, 4).join(' · ')}
+                      {t('dump.matches')} {item.matches.slice(0, 4).join(' · ')}
                       {item.matches.length > 4 ? ' …' : ''}
                     </div>
                   )}
@@ -200,7 +202,7 @@ export function DumpViewer({
                 <button
                   type="button"
                   className="icon-button subtle danger-button dump-list-delete"
-                  title="删除该会话"
+                  title={t('dump.deleteSession')}
                   disabled={deleting}
                   onClick={(event) => {
                     event.stopPropagation()
@@ -216,8 +218,8 @@ export function DumpViewer({
       </aside>
 
       <div className="dump-detail panel">
-        {!selectedId && <div className="dump-empty">选择左侧会话查看请求/响应体</div>}
-        {selectedId && loadingDetail && !detail && <div className="dump-empty">加载内容…</div>}
+        {!selectedId && <div className="dump-empty">{t('dump.selectLeftHint')}</div>}
+        {selectedId && loadingDetail && !detail && <div className="dump-empty">{t('dump.loadingContent')}</div>}
         {selectedId && detail && (
           <>
             <div className="dump-detail-header">
@@ -225,7 +227,7 @@ export function DumpViewer({
                 <div className="dump-detail-title">
                   <h3>{detail.model || detail.id}</h3>
                   <span className={`dump-status ${statusClass(detail.status)}`}>
-                    {detail.status ?? 'pending'}
+                    {detail.status ?? t('dump.pending')}
                   </span>
                 </div>
                 <div className="dump-detail-sub">
@@ -244,7 +246,7 @@ export function DumpViewer({
                   type="button"
                   onClick={() => onReloadDetail(detail.id)}
                 >
-                  重新加载
+                  {t('dump.reload')}
                 </button>
                 <button
                   className="button button-secondary danger-action"
@@ -253,7 +255,7 @@ export function DumpViewer({
                   onClick={() => onDeleteOne(detail.id)}
                 >
                   <Icon name="trash" size={15} />
-                  删除会话
+                  {t('dump.deleteSessionBtn')}
                 </button>
                 <button
                   className="button button-secondary"
@@ -262,7 +264,7 @@ export function DumpViewer({
                   onClick={() => void copyActiveFile()}
                 >
                   <Icon name="copy" size={15} />
-                  复制内容
+                  {t('dump.copyContent')}
                 </button>
                 <button
                   className="button button-secondary"
@@ -271,11 +273,11 @@ export function DumpViewer({
                   onClick={saveActiveFile}
                 >
                   <Icon name="download" size={15} />
-                  保存当前
+                  {t('dump.saveCurrent')}
                 </button>
                 <button className="button button-primary" type="button" onClick={saveAllFiles}>
                   <Icon name="download" size={15} />
-                  保存全部
+                  {t('dump.saveAll')}
                 </button>
               </div>
             </div>
@@ -300,8 +302,8 @@ export function DumpViewer({
                   <div className="dump-file-meta-left">
                     <span>
                       {activeFile.name}
-                      {activeFile.truncated ? '（内容已截断，可下载完整文件）' : ''}
-                      {contentFilter.trim() ? ' · 关键字过滤中' : ''}
+                      {activeFile.truncated ? t('dump.truncated') : ''}
+                      {contentFilter.trim() ? t('dump.keywordFiltering') : ''}
                       {copyHint ? ` · ${copyHint}` : ''}
                     </span>
                     <label className="search-field logs-filter dump-content-filter">
@@ -309,7 +311,7 @@ export function DumpViewer({
                       <input
                         value={contentFilter}
                         onChange={(event) => onContentFilterChange(event.target.value)}
-                        placeholder="关键字搜索文件内容"
+                        placeholder={t('dump.searchFileContent')}
                       />
                     </label>
                   </div>
@@ -319,7 +321,7 @@ export function DumpViewer({
                       type="button"
                       onClick={() => downloadServerFile(activeFile.name)}
                     >
-                      下载原始文件
+                      {t('dump.downloadOriginal')}
                     </button>
                   </div>
                 </div>
@@ -328,37 +330,37 @@ export function DumpViewer({
                     ref={dumpCodeRef}
                     className={`dump-code language-${activeFile.language}`}
                     dangerouslySetInnerHTML={{
-                      __html: activeHtml || (contentFilter.trim() ? '无匹配内容' : ' '),
+                      __html: activeHtml || (contentFilter.trim() ? t('dump.noMatchContent') : ' '),
                     }}
                   />
-                  <div className="logs-scroll-actions" aria-label="滚动控制">
+                  <div className="logs-scroll-actions" aria-label={t('dump.scrollControl')}>
                     <button
                       className="button button-secondary logs-scroll-button"
                       type="button"
-                      title="置顶"
+                      title={t('dump.toTop')}
                       onClick={() => {
                         requestAnimationFrame(() => scrollNode(dumpCodeRef.current, 'top'))
                       }}
                     >
                       <Icon name="toTop" size={14} />
-                      置顶
+                      {t('dump.toTop')}
                     </button>
                     <button
                       className="button button-secondary logs-scroll-button"
                       type="button"
-                      title="置底"
+                      title={t('dump.toBottom')}
                       onClick={() => {
                         requestAnimationFrame(() => scrollNode(dumpCodeRef.current, 'bottom'))
                       }}
                     >
                       <Icon name="toBottom" size={14} />
-                      置底
+                      {t('dump.toBottom')}
                     </button>
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="dump-empty">该会话暂无文件</div>
+              <div className="dump-empty">{t('dump.noFiles')}</div>
             )}
           </>
         )}

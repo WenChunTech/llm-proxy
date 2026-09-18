@@ -1,4 +1,5 @@
 import { Icon } from '../Icon'
+import { useI18n } from '../../lib/i18n'
 
 export function LoginOverlay({
   value,
@@ -9,11 +10,12 @@ export function LoginOverlay({
   onChange: (value: string) => void
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
 }) {
+  const { t } = useI18n()
   return (
     <div className="login-overlay">
       <form className="login-panel" onSubmit={onSubmit}>
-        <span className="eyebrow">DASHBOARD ACCESS</span>
-        <h2>输入 API Key</h2>
+        <span className="eyebrow">{t('auth.dashboardAccess')}</span>
+        <h2>{t('auth.enterApiKey')}</h2>
         <label className="field">
           <span>API Key</span>
           <input
@@ -21,12 +23,12 @@ export function LoginOverlay({
             type="password"
             value={value}
             onChange={(event) => onChange(event.target.value)}
-            placeholder="用于访问管理页面"
+            placeholder={t('auth.apiKeyPlaceholder')}
           />
         </label>
         <button className="button button-primary" type="submit">
           <Icon name="check" size={16} />
-          登录
+          {t('auth.login')}
         </button>
       </form>
     </div>
@@ -34,12 +36,13 @@ export function LoginOverlay({
 }
 
 export function AccessCheckingOverlay() {
+  const { t } = useI18n()
   return (
     <div className="login-overlay">
       <div className="login-panel">
-        <span className="eyebrow">DASHBOARD ACCESS</span>
-        <h2>正在校验访问权限</h2>
-        <span className="muted-copy">请稍候</span>
+        <span className="eyebrow">{t('auth.dashboardAccess')}</span>
+        <h2>{t('auth.checkingAccess')}</h2>
+        <span className="muted-copy">{t('auth.pleaseWait')}</span>
       </div>
     </div>
   )

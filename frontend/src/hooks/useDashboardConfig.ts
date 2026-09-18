@@ -24,6 +24,7 @@ import {
   persistAccessKey,
   readStoredAccessKey,
 } from '../lib/storage'
+import { t } from '../lib/i18n'
 import type {
   ApiModel,
   AuthStatus,
@@ -166,7 +167,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
       )
     } catch {
       setAuthStatus('login')
-      setToast('配置加载失败，请检查后端日志')
+      setToast(t('toast.configLoadFailed'))
     }
   }, [accessKey, applyPayload, setToast])
 
@@ -267,14 +268,14 @@ export function useDashboardConfig(setToast: (message: string) => void) {
                 setShowApiKeyEditor(false)
                 setAuthStatus('ready')
               }
-              setToast('配置已保存')
+              setToast(t('toast.configSaved'))
             } catch {
               if (Object.keys(pendingPatchRef.current).length > 0) {
                 // Keep the failed patch fields so a follow-up save still includes them.
                 pendingPatchRef.current = { ...patch, ...pendingPatchRef.current }
                 continue
               }
-              setToast('保存失败，请检查后端日志')
+              setToast(t('toast.saveFailed'))
             }
           }
         } finally {
@@ -302,7 +303,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
       const catalogPromise = fetchModelCatalog(nextKey)
       const response = await configPromise
       if (response.status === 401) {
-        setToast('API Key 不正确')
+        setToast(t('toast.apiKeyIncorrect'))
         return
       }
       if (!response.ok) throw new Error(await response.text())
@@ -320,7 +321,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
         ),
       )
     } catch {
-      setToast('登录失败，请检查后端日志')
+      setToast(t('toast.loginFailed'))
     }
   }
 
@@ -517,7 +518,7 @@ export function useDashboardConfig(setToast: (message: string) => void) {
         importedLogLevel === null &&
         importedDebugDump === null
       ) {
-        setToast('没有发现可导入的配置')
+        setToast(t('toast.noImportableConfig'))
         return
       }
       const nextProviders = imported.length ? [...providers, ...imported] : providers
@@ -544,11 +545,15 @@ export function useDashboardConfig(setToast: (message: string) => void) {
         debugDump: nextDebugDump,
       })
       setToast(
-        `已导入 ${imported.length} 个提供商，${Object.keys(importedAliases).length} 个别名` +
-          (importedLogLevel || importedDebugDump ? '，已同步日志配置' : ''),
+        t('toast.imported', {
+          providers: imported.length,
+          aliases: Object.keys(importedAliases).length,
+          extra:
+            importedLogLevel || importedDebugDump ? t('toast.importLogSynced') : '',
+        }),
       )
     } catch {
-      setToast('导入失败，请检查 JSON 格式')
+      setToast(t('toast.importFailed'))
     }
   }
 

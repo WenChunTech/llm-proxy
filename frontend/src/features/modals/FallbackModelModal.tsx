@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Icon } from '../../components/Icon'
+import { useI18n } from '../../lib/i18n'
 
 export function FallbackModelModal({
   allModels,
@@ -12,6 +13,7 @@ export function FallbackModelModal({
   onClose: () => void
   onSubmit: (models: string[]) => void
 }) {
+  const { t } = useI18n()
   const [manualInput, setManualInput] = useState('')
   const [modelSearch, setModelSearch] = useState('')
   const [showSelectedModelsOnly, setShowSelectedModelsOnly] = useState(false)
@@ -71,10 +73,10 @@ export function FallbackModelModal({
       <form className="modal fallback-picker-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-heading">
           <div>
-            <span className="eyebrow">GLOBAL FALLBACKS</span>
-            <h2>添加全局备用模型</h2>
+            <span className="eyebrow">{t('fallback.eyebrow')}</span>
+            <h2>{t('fallback.title')}</h2>
           </div>
-          <button className="icon-button" type="button" title="关闭" onClick={onClose}>
+          <button className="icon-button" type="button" title={t('fallback.close')} onClick={onClose}>
             ×
           </button>
         </div>
@@ -85,35 +87,35 @@ export function FallbackModelModal({
               value={manualInput}
               onChange={(event) => setManualInput(event.target.value)}
               onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addManualModel() } }}
-              placeholder="输入模型名称"
+              placeholder={t('fallback.inputPlaceholder')}
             />
-            <button className="icon-button accent-button" type="button" title="加入待添加列表" onClick={addManualModel}>
+            <button className="icon-button accent-button" type="button" title={t('fallback.addToPending')} onClick={addManualModel}>
               <Icon name="plus" size={16} />
             </button>
           </div>
           <div className="model-option-panel">
             <div className="model-option-toolbar">
               <div>
-                <strong>待添加 {selectedModels.length} 个 / 可选 {modelOptionList.length} 个</strong>
-                <span>{filteredModelOptions.length} 个当前可见，{visibleSelectedCount} 个已选</span>
+                <strong>{t('fallback.summary', { selected: selectedModels.length, available: modelOptionList.length })}</strong>
+                <span>{t('fallback.visibleSummary', { visible: filteredModelOptions.length, selected: visibleSelectedCount })}</span>
               </div>
               <label className="model-search-field">
                 <Icon name="search" size={14} />
                 <input
                   value={modelSearch}
                   onChange={(event) => setModelSearch(event.target.value)}
-                  placeholder="搜索模型"
+                  placeholder={t('fallback.searchPlaceholder')}
                 />
               </label>
               <div className="model-option-actions">
                 <button className="text-button" type="button" onClick={() => setVisibleModelsChecked(true)}>
-                  全选当前
+                  {t('fallback.selectAll')}
                 </button>
                 <button className="text-button" type="button" onClick={() => setVisibleModelsChecked(false)}>
-                  取消选择
+                  {t('fallback.deselectAll')}
                 </button>
                 <button className="text-button danger-text" type="button" onClick={() => setSelectedModels([])}>
-                  清空已选
+                  {t('fallback.clearSelected')}
                 </button>
               </div>
             </div>
@@ -123,7 +125,7 @@ export function FallbackModelModal({
                 checked={showSelectedModelsOnly}
                 onChange={(event) => setShowSelectedModelsOnly(event.target.checked)}
               />
-              <span>仅显示已选模型</span>
+              <span>{t('fallback.showSelectedOnly')}</span>
             </label>
             <div className="model-option-list selectable fallback-picker-list">
               {filteredModelOptions.map((model) => {
@@ -140,18 +142,18 @@ export function FallbackModelModal({
                 )
               })}
               {!filteredModelOptions.length && (
-                <span className="model-sync-status muted-copy">没有匹配的模型</span>
+                <span className="model-sync-status muted-copy">{t('fallback.noMatch')}</span>
               )}
             </div>
           </div>
         </div>
         <div className="modal-actions">
           <button className="button button-secondary" type="button" onClick={onClose}>
-            取消
+            {t('fallback.cancel')}
           </button>
           <button className="button button-primary" type="submit">
             <Icon name="plus" size={16} />
-            添加所选模型
+            {t('fallback.addSelected')}
           </button>
         </div>
       </form>

@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import type {
   AuthProviderKind,
   AuthValidationFilter,
@@ -149,20 +150,20 @@ export function normalizeAuthValidationPayloadStats(payload: AuthValidationPaylo
   }
 }
 
-export function authValidationResultKey(result: AuthValidationTarget) {
-  return `${result.providerIndex}:${result.authIndex}`
-}
-
-export function visibleAuthValidationResults(state: AuthValidationState) {
-  return state.payload.results.filter((result) => matchesAuthValidationFilter(result, state.filter))
-}
-
-export function matchesAuthValidationFilter(result: AuthValidationResult, filter: AuthValidationFilter) {
+export function matchesAuthValidationFilter(
+  result: AuthValidationResult,
+  filter: AuthValidationFilter,
+) {
   if (filter === 'all') return true
-  if (filter === 'ok') return result.valid && !result.skipped && result.reason !== 'rate_limited'
-  if (filter === 'invalid') return !result.valid && !result.skipped
-  if (filter === 'rate_limited') return result.reason === 'rate_limited'
-  return result.disabled
+  if (filter === 'ok') return result.valid && !result.disabled && result.reason !== 'rate_limited'
+  if (filter === 'invalid') return !result.valid && !result.skipped && !result.disabled
+  if (filter === 'rate_limited') return result.reason === 'rate_limited' && !result.disabled
+  if (filter === 'disabled') return result.disabled
+  return false
+}
+
+export function authValidationResultKey(result: { providerIndex: number; authIndex: number }) {
+  return `${result.providerIndex}:${result.authIndex}`
 }
 
 export function syncAuthValidationPayloadWithProviders(
@@ -297,20 +298,24 @@ export function authValidationResultLabel(
     : `${providerLabel} #${providerIndex + 1}`
 }
 
+export function visibleAuthValidationResults(state: AuthValidationState): AuthValidationResult[] {
+  return state.payload.results.filter((result) => matchesAuthValidationFilter(result, state.filter))
+}
+
 export function authValidationReasonLabel(reason: string) {
   const labels: Record<string, string> = {
-    ok: '有效',
-    invalid_auth: '认证无效',
-    rate_limited: '限流',
-    payment_required: '需付费',
-    forbidden: '禁止访问',
-    request_error: '请求受限',
-    server_error: '服务端错误',
-    network_error: '网络错误',
-    refresh_failed: '刷新失败',
-    missing_access_token: '缺少 token',
-    no_auth: '无 auth',
-    invalid_auth_json: 'JSON 无效',
+    ok: t('reason.ok'),
+    invalid_auth: t('reason.invalid_auth'),
+    rate_limited: t('reason.rate_limited'),
+    payment_required: t('reason.payment_required'),
+    forbidden: t('reason.forbidden'),
+    request_error: t('reason.request_error'),
+    server_error: t('reason.server_error'),
+    network_error: t('reason.network_error'),
+    refresh_failed: t('reason.refresh_failed'),
+    missing_access_token: t('reason.missing_access_token'),
+    no_auth: t('reason.no_auth'),
+    invalid_auth_json: t('reason.invalid_auth_json'),
   }
   return labels[reason] ?? reason
 }

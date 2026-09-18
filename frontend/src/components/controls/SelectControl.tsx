@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../Icon'
+import { t } from '../../lib/i18n'
 
 export type SelectOption<T extends string> = {
   value: T
@@ -15,7 +16,7 @@ export function SelectControl<T extends string>({
   compact = false,
   mono = false,
   searchable = false,
-  searchPlaceholder = '筛选…',
+  searchPlaceholder = t('select.searchPlaceholder'),
   ariaLabel,
 }: {
   value: T
@@ -172,7 +173,7 @@ export function SelectControl<T extends string>({
                 type="search"
                 value={query}
                 placeholder={searchPlaceholder}
-                aria-label={`${ariaLabel}筛选`}
+                aria-label={`${ariaLabel}${t('select.searchAriaSuffix')}`}
                 autoComplete="off"
                 spellCheck={false}
                 onChange={(event) => {
@@ -199,7 +200,7 @@ export function SelectControl<T extends string>({
             </button>
           ))}
           {!filteredOptions.length && (
-            <div className="select-empty">无匹配项</div>
+            <div className="select-empty">{t('select.noMatch')}</div>
           )}
         </div>
       )}

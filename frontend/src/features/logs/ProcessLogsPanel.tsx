@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
 import { Icon } from '../../components/Icon'
+import { useI18n } from '../../lib/i18n'
 import { escapeHtml, highlightKeywordInHtml } from './highlight'
 import type { ProcessLogLine } from './types'
 import { scrollNode } from './format'
@@ -17,6 +18,7 @@ export const ProcessLogsPanel = forwardRef<
     onAutoScrollChange?: (value: boolean) => void
   }
 >(function ProcessLogsPanel({ lines, filter, autoScroll, onAutoScrollChange }, ref) {
+  const { t } = useI18n()
   const processRef = useRef<HTMLPreElement | null>(null)
   const visibleLines = useMemo(() => {
     const query = filter.trim().toLowerCase()
@@ -62,28 +64,28 @@ export const ProcessLogsPanel = forwardRef<
             ))
           ) : (
             <div className="logs-empty">
-              {filter.trim() ? '没有匹配的进程日志' : '暂无进程日志输出'}
+              {filter.trim() ? t('process.noMatch') : t('process.noLogs')}
             </div>
           )}
         </pre>
-        <div className="logs-scroll-actions" aria-label="滚动控制">
+        <div className="logs-scroll-actions" aria-label={t('process.scrollControl')}>
           <button
             className="button button-secondary logs-scroll-button"
             type="button"
-            title="置顶"
+            title={t('process.toTop')}
             onClick={() => scrollTo('top')}
           >
             <Icon name="toTop" size={14} />
-            置顶
+            {t('process.toTop')}
           </button>
           <button
             className="button button-secondary logs-scroll-button"
             type="button"
-            title="置底"
+            title={t('process.toBottom')}
             onClick={() => scrollTo('bottom')}
           >
             <Icon name="toBottom" size={14} />
-            置底
+            {t('process.toBottom')}
           </button>
         </div>
       </div>

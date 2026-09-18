@@ -1,5 +1,6 @@
 import { Icon } from '../../components/Icon'
 import { SelectControl } from '../../components/controls/SelectControl'
+import { useI18n } from '../../lib/i18n'
 import type { DebugDumpConfig } from '../../types/domain'
 import { LOG_LEVEL_OPTIONS, type LogLevelPreset } from './format'
 
@@ -22,13 +23,14 @@ export function LoggingSettings({
   onReset: () => void
   onSave: () => void
 }) {
+  const { t } = useI18n()
   return (
     <section className="panel logging-settings-panel">
       <div className="panel-heading">
         <div>
-          <h3>日志与转储配置</h3>
+          <h3>{t('logSettings.title')}</h3>
           <p className="panel-caption">
-            保存后写入配置：日志等级即时生效，请求转储对后续请求生效
+            {t('logSettings.caption')}
           </p>
         </div>
       </div>
@@ -36,14 +38,14 @@ export function LoggingSettings({
       <div className="logging-settings-grid">
         <div className="logging-settings-card">
           <div className="logging-settings-card-title">
-            <strong>日志等级</strong>
+            <strong>{t('logSettings.logLevelTitle')}</strong>
             <span className="logs-meta">log_level</span>
           </div>
-          <p className="panel-description">控制进程日志详细程度，仅影响本服务相关输出。</p>
+          <p className="panel-description">{t('logSettings.logLevelDesc')}</p>
           <label className="field">
-            <span>等级</span>
+            <span>{t('logSettings.levelLabel')}</span>
             <SelectControl
-              ariaLabel="日志等级"
+              ariaLabel={t('logSettings.logLevelTitle')}
               mono
               value={draftLogLevel}
               options={[...LOG_LEVEL_OPTIONS]}
@@ -54,24 +56,24 @@ export function LoggingSettings({
 
         <div className="logging-settings-card">
           <div className="logging-settings-card-title">
-            <strong>请求转储</strong>
+            <strong>{t('logSettings.dumpTitle')}</strong>
             <span className="logs-meta">debug_dump</span>
           </div>
           <p className="panel-description">
-            开启后，每个代理请求会写入 request/response 原文，并显示「请求转储」页。
+            {t('logSettings.dumpDesc')}
           </p>
 
           <div className="logging-settings-row between">
             <div>
-              <strong>启用 debug_dump</strong>
+              <strong>{t('logSettings.enableDump')}</strong>
               <p className="panel-description logging-settings-current">
-                当前：{draftDebugDump.enabled ? '已开启' : '已关闭'}
+                {draftDebugDump.enabled ? t('logSettings.currentOn') : t('logSettings.currentOff')}
               </p>
             </div>
             <button
               className={`toggle ${draftDebugDump.enabled ? 'on' : ''}`}
               type="button"
-              aria-label="启用 debug_dump"
+              aria-label={t('logSettings.enableDump')}
               onClick={() =>
                 onDebugDumpChange((current) => ({
                   ...current,
@@ -84,7 +86,7 @@ export function LoggingSettings({
           </div>
 
           <label className="field">
-            <span>保存目录</span>
+            <span>{t('logSettings.saveDir')}</span>
             <input
               value={draftDebugDump.dir}
               onChange={(event) =>
@@ -97,15 +99,15 @@ export function LoggingSettings({
               spellCheck={false}
               disabled={!draftDebugDump.enabled}
             />
-            <small>相对进程工作目录，或使用绝对路径</small>
+            <small>{t('logSettings.dirHint')}</small>
           </label>
         </div>
       </div>
 
       <div className="logging-settings-actions">
         <div className="logs-meta">
-          {loggingDirty ? '有未保存的更改' : '已与服务端配置同步'}
-          {isSaving ? ' · 正在保存…' : ''}
+          {loggingDirty ? t('logSettings.dirty') : t('logSettings.synced')}
+          {isSaving ? t('logSettings.saving') : ''}
         </div>
         <div className="logs-actions">
           <button
@@ -114,7 +116,7 @@ export function LoggingSettings({
             disabled={!loggingDirty || isSaving}
             onClick={onReset}
           >
-            重置
+            {t('logSettings.reset')}
           </button>
           <button
             className="button button-primary"
@@ -123,7 +125,7 @@ export function LoggingSettings({
             onClick={onSave}
           >
             <Icon name="check" size={15} />
-            保存配置
+            {t('logSettings.saveConfig')}
           </button>
         </div>
       </div>

@@ -5,6 +5,7 @@ import { moveItemByAction, reorderItem } from '../../lib/list'
 import type { ListMoveAction } from '../../lib/list'
 import type { Provider, ProviderKind } from '../../types/domain'
 import { useState } from 'react'
+import { useI18n } from '../../lib/i18n'
 
 export function RoutingView({
   priority,
@@ -43,6 +44,7 @@ export function RoutingView({
       | ((current: Record<string, string[]>) => Record<string, string[]>),
   ) => void
 }) {
+  const { t } = useI18n()
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [draggedFallbackIndex, setDraggedFallbackIndex] = useState<number | null>(null)
   const [draggedAliasTarget, setDraggedAliasTarget] = useState<{ source: string; index: number } | null>(null)
@@ -50,12 +52,12 @@ export function RoutingView({
   const [aliasTarget, setAliasTarget] = useState('')
   const configuredModelOptions = configuredModels.map((model) => ({ value: model, label: model }))
   const aliasSourceOptions = [
-    { value: '', label: '选择主模型（请求名）' },
+    { value: '', label: t('routing.selectPrimary') },
     ...configuredModelOptions,
   ]
   const existingTargets = modelAliases[aliasSource] ?? []
   const aliasTargetOptions = [
-    { value: '', label: '选择失败后备用模型' },
+    { value: '', label: t('routing.selectFallback') },
     ...configuredModelOptions.filter(
       (option) => option.value !== aliasSource && !existingTargets.includes(option.value),
     ),
@@ -168,17 +170,17 @@ export function RoutingView({
     <>
       <section className="page-intro">
         <div>
-          <span className="eyebrow">TRAFFIC ORCHESTRATION</span>
-          <h2>模型路由策略</h2>
-          <p>调整提供商尝试顺序，并为常用模型定义故障转移链。</p>
+          <span className="eyebrow">{t('routing.eyebrow')}</span>
+          <h2>{t('routing.title')}</h2>
+          <p>{t('routing.desc')}</p>
         </div>
-        <div className="route-summary"><span className="status-dot" />自动路由已启用</div>
+        <div className="route-summary"><span className="status-dot" />{t('routing.autoRouting')}</div>
       </section>
       <div className="content-grid routing-grid">
         <section className="panel priority-panel">
           <div className="panel-heading">
-            <div><span className="eyebrow">PROVIDER PRIORITY</span><h3>提供商优先级</h3></div>
-            <span className="panel-caption">优先尝试顺序</span>
+            <div><span className="eyebrow">{t('routing.priorityEyebrow')}</span><h3>{t('routing.priorityTitle')}</h3></div>
+            <span className="panel-caption">{t('routing.priorityCaption')}</span>
           </div>
           <div className="priority-list">
             {priority.map((kind, index) => {
@@ -205,30 +207,30 @@ export function RoutingView({
                   }}
                   onDragEnd={() => setDraggedIndex(null)}
                 >
-                  <button className="priority-drag-handle" type="button" title={`拖动调整 ${meta.label} 顺序`} aria-label={`拖动调整 ${meta.label} 顺序`}>
+                  <button className="priority-drag-handle" type="button" title={t('routing.dragOrder', { name: meta.label })} aria-label={t('routing.dragOrder', { name: meta.label })}>
                     <Icon name="grip" size={16} />
                   </button>
                   <span className="priority-number">{String(index + 1).padStart(2, '0')}</span>
                   <div className={`provider-avatar ${kind === 'grok' ? 'grok-avatar' : ''}`} style={{ backgroundColor: meta.color }}>{providerMarkText(kind)}</div>
-                  <div className="priority-copy"><strong>{meta.label}</strong><span>{count ? `${count} 个活动配置` : '暂无活动配置'}</span></div>
+                  <div className="priority-copy"><strong>{meta.label}</strong><span>{count ? t('routing.activeConfigs', { count }) : t('routing.noActiveConfigs')}</span></div>
                   <div className="priority-actions">
-                    <button className="icon-button subtle" type="button" title="置顶" disabled={index === 0} onClick={() => onMove(index, 'top')}><Icon name="toTop" size={15} /></button>
-                    <button className="icon-button subtle" type="button" title="上移" disabled={index === 0} onClick={() => onMove(index, -1)}><Icon name="arrowUp" size={15} /></button>
-                    <button className="icon-button subtle" type="button" title="下移" disabled={index === priority.length - 1} onClick={() => onMove(index, 1)}><Icon name="arrowDown" size={15} /></button>
-                    <button className="icon-button subtle" type="button" title="置底" disabled={index === priority.length - 1} onClick={() => onMove(index, 'bottom')}><Icon name="toBottom" size={15} /></button>
+                    <button className="icon-button subtle" type="button" title={t('routing.toTop')} disabled={index === 0} onClick={() => onMove(index, 'top')}><Icon name="toTop" size={15} /></button>
+                    <button className="icon-button subtle" type="button" title={t('routing.moveUp')} disabled={index === 0} onClick={() => onMove(index, -1)}><Icon name="arrowUp" size={15} /></button>
+                    <button className="icon-button subtle" type="button" title={t('routing.moveDown')} disabled={index === priority.length - 1} onClick={() => onMove(index, 1)}><Icon name="arrowDown" size={15} /></button>
+                    <button className="icon-button subtle" type="button" title={t('routing.toBottom')} disabled={index === priority.length - 1} onClick={() => onMove(index, 'bottom')}><Icon name="toBottom" size={15} /></button>
                   </div>
                 </div>
               )
             })}
           </div>
-          <div className="info-callout"><Icon name="pulse" size={16} /><span>同一模型会按照上面的顺序依次尝试，单个提供商可配置多个上游端点。</span></div>
+          <div className="info-callout"><Icon name="pulse" size={16} /><span>{t('routing.priorityHint')}</span></div>
         </section>
         <section className="panel fallback-panel">
           <div className="panel-heading">
-            <div><span className="eyebrow">GLOBAL FALLBACKS</span><h3>全局备用模型</h3></div>
-            <button className="button button-secondary fallback-add-button" type="button" onClick={onAddFallback}><Icon name="plus" size={16} />添加模型</button>
+            <div><span className="eyebrow">{t('routing.fallbackEyebrow')}</span><h3>{t('routing.fallbackTitle')}</h3></div>
+            <button className="button button-secondary fallback-add-button" type="button" onClick={onAddFallback}><Icon name="plus" size={16} />{t('routing.addModel')}</button>
           </div>
-          <p className="panel-description">任意主模型全部失败后，按以下顺序全局切换备用模型；列表中的主模型自身会被跳过。</p>
+          <p className="panel-description">{t('routing.fallbackDesc')}</p>
           <div className="fallback-list">
             {fallbacks.map((model, index) => (
               <div
@@ -251,24 +253,24 @@ export function RoutingView({
                 }}
                 onDragEnd={() => setDraggedFallbackIndex(null)}
               >
-                <button className="priority-drag-handle" type="button" title={`拖动调整 ${model} 顺序`} aria-label={`拖动调整 ${model} 顺序`}>
+                <button className="priority-drag-handle" type="button" title={t('routing.dragOrder', { name: model })} aria-label={t('routing.dragOrder', { name: model })}>
                   <Icon name="grip" size={15} />
                 </button>
                 <span className="fallback-index">{index + 1}</span>
-                <div className="fallback-copy"><strong>{model}</strong><span>{allModels.includes(model) ? '已注册模型' : '等待提供商配置'}</span></div>
+                <div className="fallback-copy"><strong>{model}</strong><span>{allModels.includes(model) ? t('routing.registeredModel') : t('routing.pendingProvider')}</span></div>
                 <div className="priority-actions">
-                  <button className="icon-button subtle" type="button" title="置顶" disabled={index === 0} onClick={() => onMoveFallback(index, 'top')}><Icon name="toTop" size={15} /></button>
-                  <button className="icon-button subtle" type="button" title="上移" disabled={index === 0} onClick={() => onMoveFallback(index, -1)}><Icon name="arrowUp" size={15} /></button>
-                  <button className="icon-button subtle" type="button" title="下移" disabled={index === fallbacks.length - 1} onClick={() => onMoveFallback(index, 1)}><Icon name="arrowDown" size={15} /></button>
-                  <button className="icon-button subtle" type="button" title="置底" disabled={index === fallbacks.length - 1} onClick={() => onMoveFallback(index, 'bottom')}><Icon name="toBottom" size={15} /></button>
-                  <button className="icon-button subtle danger-button" type="button" title="移除全局备用模型" onClick={() => onRemoveFallback(model)}><Icon name="trash" size={15} /></button>
+                  <button className="icon-button subtle" type="button" title={t('routing.toTop')} disabled={index === 0} onClick={() => onMoveFallback(index, 'top')}><Icon name="toTop" size={15} /></button>
+                  <button className="icon-button subtle" type="button" title={t('routing.moveUp')} disabled={index === 0} onClick={() => onMoveFallback(index, -1)}><Icon name="arrowUp" size={15} /></button>
+                  <button className="icon-button subtle" type="button" title={t('routing.moveDown')} disabled={index === fallbacks.length - 1} onClick={() => onMoveFallback(index, 1)}><Icon name="arrowDown" size={15} /></button>
+                  <button className="icon-button subtle" type="button" title={t('routing.toBottom')} disabled={index === fallbacks.length - 1} onClick={() => onMoveFallback(index, 'bottom')}><Icon name="toBottom" size={15} /></button>
+                  <button className="icon-button subtle danger-button" type="button" title={t('routing.removeFallback')} onClick={() => onRemoveFallback(model)}><Icon name="trash" size={15} /></button>
                 </div>
               </div>
             ))}
           </div>
-          {!fallbacks.length && <div className="empty-state small"><span>还没有全局备用模型</span></div>}
+          {!fallbacks.length && <div className="empty-state small"><span>{t('routing.noFallbacks')}</span></div>}
           <div className="model-catalog">
-            <span className="section-label">AVAILABLE MODELS</span>
+            <span className="section-label">{t('routing.availableModels')}</span>
             {selectableModelGroups.map(({ kind, models }) => (
               <div className="model-catalog-group" key={kind}>
                 <div className="model-catalog-heading">
@@ -286,53 +288,53 @@ export function RoutingView({
               </div>
             ))}
             {!selectableModelGroups.length && (
-              <div className="empty-state small"><span>没有可添加的同步模型</span></div>
+              <div className="empty-state small"><span>{t('routing.noSyncedModels')}</span></div>
             )}
           </div>
         </section>
         <section className="panel model-alias-panel">
           <div className="panel-heading">
-            <div><span className="eyebrow">MODEL ALIASES</span><h3>模型别名降级</h3></div>
-            <span className="panel-caption">{aliasRows.length} 组 / {aliasTargetCount} 个目标</span>
+            <div><span className="eyebrow">{t('routing.aliasEyebrow')}</span><h3>{t('routing.aliasTitle')}</h3></div>
+            <span className="panel-caption">{t('routing.aliasCaption', { groups: aliasRows.length, targets: aliasTargetCount })}</span>
           </div>
           <p className="panel-description">
-            先尝试请求的主模型；失败后再按顺序尝试该模型配置的多个别名目标，最后才走全局备用模型。
+            {t('routing.aliasDesc')}
           </p>
           <div className="alias-add-row">
             <div className="alias-add-header">
               <div className="alias-add-title">
-                <span className="alias-add-label">新增别名</span>
-                <span className="alias-add-hint">主模型失败后按顺序尝试备用目标</span>
+                <span className="alias-add-label">{t('routing.newAlias')}</span>
+                <span className="alias-add-hint">{t('routing.aliasHint')}</span>
               </div>
             </div>
             <div className="alias-add-fields">
               <label className="alias-add-field">
-                <span className="alias-field-label">主模型（请求名）</span>
+                <span className="alias-field-label">{t('routing.primaryLabel')}</span>
                 <SelectControl
                   mono
                   searchable
-                  searchPlaceholder="筛选主模型…"
+                  searchPlaceholder={t('routing.filterPrimary')}
                   value={aliasSource}
-                  options={configuredModelOptions.length ? aliasSourceOptions : [{ value: '', label: '暂无可选模型' }]}
+                  options={configuredModelOptions.length ? aliasSourceOptions : [{ value: '', label: t('routing.noModelsAvailable') }]}
                   onChange={setAliasSource}
                   disabled={!configuredModelOptions.length}
-                  ariaLabel="选择主模型（请求名）"
+                  ariaLabel={t('routing.selectPrimary')}
                 />
               </label>
               <span className="alias-add-arrow" aria-hidden="true">
                 <span className="alias-add-arrow-badge">→</span>
               </span>
               <label className="alias-add-field">
-                <span className="alias-field-label">失败后备用</span>
+                <span className="alias-field-label">{t('routing.fallbackLabel')}</span>
                 <SelectControl
                   mono
                   searchable
-                  searchPlaceholder="筛选备用模型…"
+                  searchPlaceholder={t('routing.filterFallback')}
                   value={aliasTarget}
-                  options={configuredModelOptions.length ? aliasTargetOptions : [{ value: '', label: '暂无可选模型' }]}
+                  options={configuredModelOptions.length ? aliasTargetOptions : [{ value: '', label: t('routing.noModelsAvailable') }]}
                   onChange={setAliasTarget}
                   disabled={!configuredModelOptions.length || !aliasSource}
-                  ariaLabel="选择失败后备用模型"
+                  ariaLabel={t('routing.selectFallback')}
                 />
               </label>
               <button
@@ -340,40 +342,40 @@ export function RoutingView({
                 type="button"
                 title={
                   !aliasSource || !aliasTarget
-                    ? '请先选择主模型和备用模型'
+                    ? t('routing.needBothModels')
                     : aliasSource === aliasTarget
-                      ? '备用模型不能与主模型相同'
+                      ? t('routing.sameModel')
                       : existingTargets.includes(aliasTarget)
-                        ? '该备用模型已添加'
-                        : '添加别名目标'
+                        ? t('routing.alreadyAdded')
+                        : t('routing.addAliasTarget')
                 }
                 disabled={!canAddAlias}
                 onClick={addAlias}
               >
                 <Icon name="plus" size={15} />
-                添加目标
+                {t('routing.addTarget')}
               </button>
             </div>
           </div>
           <div className="alias-list">
             {aliasRows.map(([source, targets]) => (
               <div className="alias-row" key={source}>
-                <span className="alias-field-label alias-source-label">主模型</span>
+                <span className="alias-field-label alias-source-label">{t('routing.primary')}</span>
                 <div className="alias-targets-heading">
-                  <span className="alias-field-label">失败后备用</span>
-                  <span className="alias-target-count">{targets.length} 个</span>
+                  <span className="alias-field-label">{t('routing.fallbackAfter')}</span>
+                  <span className="alias-target-count">{t('routing.targetCount', { count: targets.length })}</span>
                 </div>
                 <span className="alias-row-spacer" aria-hidden="true" />
                 <div className="alias-source-control">
                   <SelectControl
                     mono
                     searchable
-                    searchPlaceholder="筛选主模型…"
+                    searchPlaceholder={t('routing.filterPrimary')}
                     value={source}
-                    options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: '暂无可选模型' }]}
+                    options={configuredModelOptions.length ? configuredModelOptions : [{ value: '', label: t('routing.noModelsAvailable') }]}
                     onChange={(nextSource) => updateAliasSource(source, nextSource)}
                     disabled={!configuredModelOptions.length}
-                    ariaLabel={`修改主模型 ${source}`}
+                    ariaLabel={t('routing.editPrimary', { source })}
                   />
                 </div>
                 <span className="alias-arrow" aria-hidden="true">→</span>
@@ -383,7 +385,7 @@ export function RoutingView({
                       className={`alias-target-chip ${draggedAliasTarget?.source === source && draggedAliasTarget.index === index ? 'is-dragging' : ''}`}
                       key={`${source}:${target}`}
                       draggable={targets.length > 1}
-                      title={targets.length > 1 ? '拖动调整备用顺序' : undefined}
+                      title={targets.length > 1 ? t('routing.dragFallbackOrder') : undefined}
                       onDragStart={(event) => {
                         if (targets.length <= 1) {
                           event.preventDefault()
@@ -419,7 +421,7 @@ export function RoutingView({
                           <button
                             className="alias-chip-move"
                             type="button"
-                            title="上移"
+                            title={t('routing.moveUp')}
                             disabled={index === 0}
                             onClick={() => moveAliasTarget(source, index, -1)}
                             onPointerDown={(event) => event.stopPropagation()}
@@ -429,7 +431,7 @@ export function RoutingView({
                           <button
                             className="alias-chip-move"
                             type="button"
-                            title="下移"
+                            title={t('routing.moveDown')}
                             disabled={index === targets.length - 1}
                             onClick={() => moveAliasTarget(source, index, 1)}
                             onPointerDown={(event) => event.stopPropagation()}
@@ -441,7 +443,7 @@ export function RoutingView({
                       <button
                         className="alias-chip-remove"
                         type="button"
-                        title={`移除 ${target}`}
+                        title={t('routing.removeTarget', { target })}
                         onClick={() => removeAliasTarget(source, target)}
                         onPointerDown={(event) => event.stopPropagation()}
                       >
@@ -453,31 +455,31 @@ export function RoutingView({
                     <SelectControl
                       mono
                       searchable
-                      searchPlaceholder="筛选备用模型…"
+                      searchPlaceholder={t('routing.filterFallback')}
                       value=""
                       options={[
-                        { value: '', label: '+ 添加目标' },
+                        { value: '', label: t('routing.addTargetShort') },
                         ...configuredModelOptions.filter(
                           (option) => option.value !== source && !targets.includes(option.value),
                         ),
                       ]}
                       onChange={(nextTarget) => addAliasTarget(source, nextTarget)}
                       disabled={!configuredModelOptions.length}
-                      ariaLabel={`为 ${source} 添加备用模型`}
+                      ariaLabel={t('routing.addFallbackFor', { source })}
                     />
                   </div>
                 </div>
                 <button
                   className="icon-button subtle danger-button alias-row-remove"
                   type="button"
-                  title="移除整组别名"
+                  title={t('routing.removeAliasGroup')}
                   onClick={() => removeAlias(source)}
                 >
                   <Icon name="trash" size={15} />
                 </button>
               </div>
             ))}
-            {!aliasRows.length && <div className="empty-state small"><span>还没有模型别名降级</span></div>}
+            {!aliasRows.length && <div className="empty-state small"><span>{t('routing.noAliases')}</span></div>}
           </div>
         </section>
       </div>

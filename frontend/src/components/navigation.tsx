@@ -1,4 +1,5 @@
 import { Icon } from './Icon'
+import { useI18n } from '../lib/i18n'
 import { defaultPriority, providerMeta } from '../config/providers'
 import type { Provider, ProviderKind, ProviderKindFilter } from '../types/domain'
 
@@ -42,6 +43,7 @@ export function ProviderNavGroups({
   collapsed: boolean
   onSelect: (kind: ProviderKind) => void
 }) {
+  const { t } = useI18n()
   const counts = defaultPriority.map((kind) => ({
     kind,
     total: providers.filter((provider) => provider.kind === kind).length,
@@ -51,7 +53,7 @@ export function ProviderNavGroups({
   return (
     <div className={`provider-nav-section ${collapsed ? 'is-collapsed' : ''}`}>
       {!collapsed && (
-        <div className="provider-nav-groups" aria-label="提供商分组">
+        <div className="provider-nav-groups" aria-label={t('nav.providerGroups')}>
           {counts.map(({ kind, total, enabled }) => {
             const meta = providerMeta[kind]
             return (

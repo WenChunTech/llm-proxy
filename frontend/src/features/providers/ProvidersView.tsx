@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../../components/Icon'
+import { useI18n } from '../../lib/i18n'
 import { providerMeta, providerMarkText, effectiveBaseUrlForProvider, defaultPriority } from '../../config/providers'
 import type { ListMoveAction } from '../../lib/list'
 import type {
@@ -41,6 +42,7 @@ function AuthValidationConcurrencyControl({
   compact?: boolean
   onChange: (value: number) => void
 }) {
+  const { t } = useI18n()
   const [draft, setDraft] = useState(String(value))
 
   useEffect(() => {
@@ -59,14 +61,14 @@ function AuthValidationConcurrencyControl({
   return (
     <label
       className={`auth-validation-concurrency-control${compact ? ' compact' : ''}`}
-      title="Codex / Grok auth 校验并发数"
+      title={t('providers.concurrencyTitle')}
     >
-      <span>{compact ? '并发' : '校验并发'}</span>
+      <span>{compact ? t('providers.concurrencyShort') : t('providers.concurrencyFull')}</span>
       <input
         type="text"
         inputMode="numeric"
         pattern="[0-9]*"
-        aria-label="Auth 校验并发数"
+        aria-label={t('providers.concurrencyAria')}
         value={draft}
         disabled={disabled}
         onChange={(event) => {
@@ -154,41 +156,40 @@ export function ProvidersView({
   onDeleteAuthResult: (kind: AuthProviderKind, target: AuthValidationTarget) => void
   setToast: (message: string) => void
 }) {
+  const { t } = useI18n()
   const [draggedProviderId, setDraggedProviderId] = useState<string | null>(null)
   const visibleProviders = providers.filter((provider) => {
     const matchesFilter = filter === 'all' || provider.enabled
     const matchesKind = kindFilter === 'all' || provider.kind === kindFilter
-    const searchText = `${provider.name} ${providerMeta[provider.kind].label} ${provider.baseUrl} ${effectiveBaseUrlForProvider(provider)}`.toLowerCase()
-    return matchesFilter && matchesKind && searchText.includes(query.toLowerCase())
+    const searchText = `${provider.name} ${providerMeta[provider.kind].label} ${effectiveBaseUrlForProvider(provider)} ${provider.models.join(' ')}`.toLowerCase()
+    return matchesFilter && matchesKind && searchText.includes(query.trim().toLowerCase())
   })
-  const showAuthValidationPanel = Boolean(
-    authValidation && (kindFilter === 'all' || kindFilter === authValidation.kind),
-  )
-  const authValidationResults =
-    authValidation && showAuthValidationPanel ? visibleAuthValidationResults(authValidation) : []
-  const authSummary =
-    authValidation && showAuthValidationPanel
-      ? authValidationSummary(authValidation.payload.results)
-      : null
+
   const groupedProviders = defaultPriority
     .map((kind) => ({
       kind,
       providers: visibleProviders.filter((provider) => provider.kind === kind),
     }))
-      .filter((group) => group.providers.length)
+    .filter((group) => group.providers.length)
+
+  const providerKindIndices = buildProviderKindIndexMap(providers)
+  const providerOrder = buildProviderOrderMap(providers)
   const authValidationByProvider = authValidation
     ? buildAuthValidationLookup(authValidation.payload.results)
     : new Map<string, AuthValidationState['payload']['results']>()
-  const providerKindIndices = buildProviderKindIndexMap(providers)
-  const providerOrder = buildProviderOrderMap(providers)
+  const authSummary = authValidation ? authValidationSummary(authValidation.payload.results) : null
+  const authValidationResults = authValidation
+    ? visibleAuthValidationResults(authValidation)
+    : []
+  const showAuthValidationPanel = Boolean(authValidation && authValidationResults.length)
 
   return (
     <>
       <section className="page-intro">
         <div>
-          <span className="eyebrow">UPSTREAM CONNECTIONS</span>
-          <h2>提供商配置</h2>
-          <p>维护上游 API 端点、模型清单与启用状态。保存后 Rust 运行态会立即刷新路由。</p>
+          <span className="eyebrow">{t('providers.eyebrow')}</span>
+          <h2>{t('providers.configTitle')}</h2>
+          <p>{t('providers.configDesc')}</p>
         </div>
         <div className="page-intro-actions">
           <AuthValidationConcurrencyControl
@@ -196,26 +197,26 @@ export function ProvidersView({
             disabled={isKindValidating('codex') || isKindValidating('grok')}
             onChange={onValidationConcurrencyChange}
           />
-          <button className="button button-primary" type="button" onClick={onAdd}><Icon name="plus" size={17} />添加提供商</button>
+          <button className="button button-primary" type="button" onClick={onAdd}><Icon name="plus" size={17} />{t('providers.addProvider')}</button>
         </div>
       </section>
       <div className="toolbar">
         <label className="search-field">
           <Icon name="search" size={17} />
-          <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索提供商、协议或地址" />
+          <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder={t('providers.searchPlaceholder')} />
         </label>
         <div className="segmented-control">
-          <button className={filter === 'all' ? 'selected' : ''} type="button" onClick={() => onFilterChange('all')}>全部 <span>{providers.length}</span></button>
-          <button className={filter === 'enabled' ? 'selected' : ''} type="button" onClick={() => onFilterChange('enabled')}>已启用 <span>{providers.filter((provider) => provider.enabled).length}</span></button>
+          <button className={filter === 'all' ? 'selected' : ''} type="button" onClick={() => onFilterChange('all')}>{t('providers.filterAll')} <span>{providers.length}</span></button>
+          <button className={filter === 'enabled' ? 'selected' : ''} type="button" onClick={() => onFilterChange('enabled')}>{t('providers.filterEnabled')} <span>{providers.filter((provider) => provider.enabled).length}</span></button>
         </div>
       </div>
       {kindFilter !== 'all' && (
         <div className="active-filter-bar">
           <span>
-            当前分组：<strong>{providerMeta[kindFilter].label}</strong>
+            {t('providers.currentGroup')}<strong>{providerMeta[kindFilter].label}</strong>
           </span>
           <button className="text-button" type="button" onClick={() => onKindFilterChange('all')}>
-            查看全部
+            {t('providers.viewAll')}
             <Icon name="chevron" size={14} />
           </button>
         </div>
@@ -243,10 +244,10 @@ export function ProvidersView({
                       onClick={() => onValidateAuths(kind)}
                     >
                       <Icon name={isKindValidating(kind) ? 'pulse' : 'check'} size={15} />
-                      {isKindValidating(kind) ? '校验中' : '校验 Auth'}
+                      {isKindValidating(kind) ? t('providers.validating') : t('providers.validateAuth')}
                     </button>
                   )}
-                  <span className="provider-group-count">{enabledCount}/{groupProviders.length} 已启用</span>
+                  <span className="provider-group-count">{t('providers.enabledCount', { enabled: enabledCount, total: groupProviders.length })}</span>
                 </div>
               </div>
               <div className="provider-group-list">
@@ -292,14 +293,14 @@ export function ProvidersView({
             </section>
           )
         })}
-        {!visibleProviders.length && <div className="empty-state"><Icon name="search" size={24} /><strong>没有匹配的提供商</strong><span>尝试修改搜索词或筛选条件。</span></div>}
+        {!visibleProviders.length && <div className="empty-state"><Icon name="search" size={24} /><strong>{t('providers.noMatch')}</strong><span>{t('providers.noMatchHint')}</span></div>}
       </div>
       {authValidation && showAuthValidationPanel && (
         <section className="auth-validation-panel">
           <div className="auth-validation-summary">
             <div>
               <span className="eyebrow">AUTH VALIDATION</span>
-              <strong>{providerMeta[authValidation.kind].label} 校验结果</strong>
+              <strong>{t('providers.validationResults', { label: providerMeta[authValidation.kind].label })}</strong>
             </div>
             <div className="auth-validation-summary-side">
               <AuthValidationConcurrencyControl
@@ -311,8 +312,8 @@ export function ProvidersView({
               <button
                 className="icon-button"
                 type="button"
-                title="关闭校验结果"
-                aria-label="关闭校验结果"
+                title={t('providers.closeValidation')}
+                aria-label={t('providers.closeValidation')}
                 onClick={onClearAuthValidation}
                 disabled={isKindValidating(authValidation.kind)}
               >
@@ -320,14 +321,14 @@ export function ProvidersView({
               </button>
             </div>
             <div className="auth-validation-metrics">
-              <span className="summary total">总数 <b>{authSummary?.total ?? 0}</b></span>
-              <span className="summary enabled">启用 <b>{authSummary?.enabled ?? 0}</b></span>
-              <span className="summary disabled">禁用 <b>{authSummary?.disabled ?? 0}</b></span>
-              <span className="status ok">有效 <b>{authSummary?.valid ?? 0}</b></span>
-              <span className="status error">无效 <b>{authSummary?.invalid ?? 0}</b></span>
-              <span className="status skipped">跳过 <b>{authSummary?.skipped ?? 0}</b></span>
-              <span className="status limited">限流 <b>{authSummary?.rateLimited ?? 0}</b></span>
-              <span>刷新 <b>{authSummary?.refreshed ?? 0}</b></span>
+              <span className="summary total">{t('providers.total')} <b>{authSummary?.total ?? 0}</b></span>
+              <span className="summary enabled">{t('providers.enabled')} <b>{authSummary?.enabled ?? 0}</b></span>
+              <span className="summary disabled">{t('providers.disabled')} <b>{authSummary?.disabled ?? 0}</b></span>
+              <span className="status ok">{t('providers.valid')} <b>{authSummary?.valid ?? 0}</b></span>
+              <span className="status error">{t('providers.invalid')} <b>{authSummary?.invalid ?? 0}</b></span>
+              <span className="status skipped">{t('providers.skipped')} <b>{authSummary?.skipped ?? 0}</b></span>
+              <span className="status limited">{t('providers.rateLimited')} <b>{authSummary?.rateLimited ?? 0}</b></span>
+              <span>{t('providers.refreshed')} <b>{authSummary?.refreshed ?? 0}</b></span>
             </div>
           </div>
           <div className="auth-validation-toolbar">
@@ -346,16 +347,16 @@ export function ProvidersView({
             <div className="auth-validation-actions">
               <button className="button button-secondary compact-model-sync-button" type="button" onClick={onValidateVisibleAuths} disabled={isKindValidating(authValidation.kind) || !authValidationResults.length}>
                 <Icon name={isKindValidating(authValidation.kind) ? 'pulse' : 'check'} size={15} />
-                {isKindValidating(authValidation.kind) ? '校验中' : '校验当前筛选'}
+                {isKindValidating(authValidation.kind) ? t('providers.validating') : t('providers.validateFiltered')}
               </button>
               <button className="button button-secondary compact-model-sync-button" type="button" onClick={onEnableVisibleAuths} disabled={!authValidationResults.length}>
-                启用当前筛选
+                {t('providers.enableFiltered')}
               </button>
               <button className="button button-secondary compact-model-sync-button" type="button" onClick={onDisableVisibleAuths} disabled={!authValidationResults.length}>
-                禁用当前筛选
+                {t('providers.disableFiltered')}
               </button>
               <button className="button button-secondary compact-model-sync-button danger-action" type="button" onClick={onDeleteVisibleAuths} disabled={!authValidationResults.length}>
-                删除当前筛选
+                {t('providers.deleteFiltered')}
               </button>
             </div>
           </div>
@@ -380,7 +381,7 @@ export function ProvidersView({
               />
             ))}
             {!authValidationResults.length && (
-              <div className="empty-state small"><span>当前筛选项没有结果</span></div>
+              <div className="empty-state small"><span>{t('providers.noFilteredResults')}</span></div>
             )}
           </div>
         </section>

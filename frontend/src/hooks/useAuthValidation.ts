@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { providerMeta } from '../config/providers'
+import { t } from '../lib/i18n'
 import {
   applyAuthValidationResults,
   deleteProviderAuthTarget,
@@ -81,12 +82,12 @@ export function useAuthValidation(options: {
     ) => {
       const kindProviders = providersRef.current.filter((provider) => provider.kind === kind)
       if (!kindProviders.length) {
-        setToast(`没有可校验的 ${providerMeta[kind].label} 提供商`)
+        setToast(t('toast.noValidatable', { label: providerMeta[kind].label }))
         return
       }
       const targets = validateOptions.targets
       if (targets && !targets.length) {
-        setToast('当前筛选项没有可校验的 auth')
+        setToast(t('toast.noAuthToValidate'))
         return
       }
 
@@ -95,7 +96,7 @@ export function useAuthValidation(options: {
         ? targets.some((target) => isTargetValidating(currentJobs, kind, target))
         : isKindValidating(currentJobs, kind)
       if (blocked) {
-        setToast(`${providerMeta[kind].label} 正在校验中，请稍候`)
+        setToast(t('toast.alreadyValidating', { label: providerMeta[kind].label }))
         return
       }
 
@@ -107,7 +108,7 @@ export function useAuthValidation(options: {
         status: 'running',
         total: 0,
         completed: 0,
-        currentLabel: '连接中…',
+        currentLabel: t('toast.connecting'),
       }
       setValidationJobs((current) => [...current, job])
 
@@ -126,7 +127,7 @@ export function useAuthValidation(options: {
             upsertJob(jobId, {
               total: event.total,
               completed: 0,
-              currentLabel: event.total > 0 ? `0/${event.total}` : '准备中…',
+              currentLabel: event.total > 0 ? `0/${event.total}` : t('toast.preparing'),
             })
           },
           onResult: (event) => {
@@ -181,10 +182,10 @@ export function useAuthValidation(options: {
               status: 'done',
               total: event.data.total,
               completed: event.data.total,
-              currentLabel: '完成',
+              currentLabel: t('toast.validationDone'),
             })
             setToast(
-              `${providerMeta[kind].label} 校验完成：有效 ${nextValidation.payload.valid}，无效 ${nextValidation.payload.invalid}`,
+              t('toast.validationSummary', { label: providerMeta[kind].label, valid: nextValidation.payload.valid, invalid: nextValidation.payload.invalid }),
             )
             removeJobLater(jobId)
           },
@@ -193,15 +194,15 @@ export function useAuthValidation(options: {
               setAuthStatus('login')
             } else {
               setToast(
-                message && message !== 'WebSocket 连接失败' && message !== '校验连接已断开'
-                  ? `${providerMeta[kind].label} auth 校验失败：${message}`
-                  : `${providerMeta[kind].label} auth 校验失败`,
+                message && message !== t('stream.wsFailed') && message !== t('stream.wsDisconnected')
+                  ? t('toast.validationFailedDetail', { label: providerMeta[kind].label, message })
+                  : t('toast.validationFailed', { label: providerMeta[kind].label }),
               )
             }
             upsertJob(jobId, {
               status: 'error',
               error: message,
-              currentLabel: '失败',
+              currentLabel: t('toast.failed'),
             })
             removeJobLater(jobId)
           },
@@ -257,7 +258,7 @@ export function useAuthValidation(options: {
     updateAuthValidationProviders(
       kind,
       (currentProviders) => setProviderAuthDisabled(currentProviders, kind, target, disabled),
-      disabled ? '已禁用 auth，配置保存中' : '已启用 auth，配置保存中',
+      disabled ? t('toast.authDisabled') : t('toast.authEnabled'),
     )
   }
 
@@ -265,7 +266,7 @@ export function useAuthValidation(options: {
     updateAuthValidationProviders(
       kind,
       (currentProviders) => deleteProviderAuthTarget(currentProviders, kind, target),
-      '已删除 auth，配置保存中',
+      t('toast.authDeleted'),
     )
   }
 
@@ -295,7 +296,7 @@ export function useAuthValidation(options: {
             ),
           currentProviders,
         ),
-      `已启用 ${targets.length} 个 auth`,
+      t('toast.enabledCount', { count: targets.length }),
     )
   }
 
@@ -316,7 +317,7 @@ export function useAuthValidation(options: {
             ),
           currentProviders,
         ),
-      `已禁用 ${targets.length} 个 auth`,
+      t('toast.disabledCount', { count: targets.length }),
     )
   }
 
@@ -337,7 +338,7 @@ export function useAuthValidation(options: {
               }),
             currentProviders,
           ),
-      `已删除 ${targets.length} 个 auth`,
+      t('toast.deletedCount', { count: targets.length }),
     )
   }
 

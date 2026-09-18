@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import type {
   AuthProviderKind,
   AuthValidationPayload,
@@ -167,11 +168,11 @@ export function streamAuthValidation(options: {
   }
 
   ws.onerror = () => {
-    finishError('WebSocket 连接失败')
+    finishError(t('stream.wsFailed'))
   }
 
   ws.onclose = () => {
-    if (!settled) finishError('校验连接已断开')
+    if (!settled) finishError(t('stream.wsDisconnected'))
   }
 
   return () => {

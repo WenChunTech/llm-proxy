@@ -1,14 +1,10 @@
 import type { ReactNode } from 'react'
 import { Icon } from '../Icon'
+import { LanguageSwitcher } from '../LanguageSwitcher'
 import { ThemeSwitcher } from '../ThemeSwitcher'
 import { NavItem, ProviderNavGroups } from '../navigation'
+import { useI18n } from '../../lib/i18n'
 import type { Provider, ProviderKindFilter, ThemeMode, View } from '../../types/domain'
-
-const pageTitle: Record<View, string> = {
-  providers: '提供商',
-  routing: '模型路由',
-  logs: '请求日志',
-}
 
 export function AppShell({
   view,
@@ -45,6 +41,13 @@ export function AppShell({
   onExport: () => void
   children: ReactNode
 }) {
+  const { t } = useI18n()
+  const pageTitle: Record<View, string> = {
+    providers: t('shell.pageTitle.providers'),
+    routing: t('shell.pageTitle.routing'),
+    logs: t('shell.pageTitle.logs'),
+  }
+
   return (
     <div className={`app-shell ${sidebarCollapsed ? 'sidebar-is-collapsed' : ''}`}>
       <aside className="sidebar">
@@ -52,23 +55,23 @@ export function AppShell({
           <div className="brand-mark">L</div>
           <div>
             <strong>LLM Proxy</strong>
-            <span>control center</span>
+            <span>{t('shell.controlCenter')}</span>
           </div>
           <button
             className="sidebar-collapse-button"
             type="button"
-            title={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
-            aria-label={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
+            title={sidebarCollapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')}
+            aria-label={sidebarCollapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')}
             onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
           >
             <Icon name="sidebar" size={17} />
           </button>
         </div>
 
-        <nav className="nav-list" aria-label="主导航">
+        <nav className="nav-list" aria-label={t('shell.mainNav')}>
           <NavItem
             icon="server"
-            label="提供商"
+            label={t('shell.pageTitle.providers')}
             count={providers.length}
             active={view === 'providers'}
             expanded={!providerNavCollapsed}
@@ -91,13 +94,13 @@ export function AppShell({
           />
           <NavItem
             icon="route"
-            label="模型路由"
+            label={t('shell.pageTitle.routing')}
             active={view === 'routing'}
             onClick={() => setView('routing')}
           />
           <NavItem
             icon="terminal"
-            label="请求日志"
+            label={t('shell.pageTitle.logs')}
             active={view === 'logs'}
             onClick={() => setView('logs')}
           />
@@ -105,9 +108,9 @@ export function AppShell({
 
         <div className="sidebar-bottom">
           <div className="sidebar-footer">
-            <span>v0.1.1</span>
+            <span>v0.1.16</span>
             <span className="footer-dot">•</span>
-            <span>Rust runtime</span>
+            <span>{t('shell.rustRuntime')}</span>
           </div>
         </div>
       </aside>
@@ -116,13 +119,14 @@ export function AppShell({
         <header className="topbar">
           <div>
             <div className="breadcrumb">
-              <span>Embedded console</span>
+              <span>{t('shell.embeddedConsole')}</span>
               <Icon name="chevron" size={13} />
               <strong>{pageTitle[view]}</strong>
             </div>
             <h1>{pageTitle[view]}</h1>
           </div>
           <div className="topbar-actions">
+            <LanguageSwitcher />
             <ThemeSwitcher value={themeMode} onChange={setThemeMode} />
             <button className="button button-secondary" type="button" onClick={onOpenApiKey}>
               <Icon name="key" size={16} />
@@ -130,7 +134,7 @@ export function AppShell({
             </button>
             <label className="button button-secondary import-button">
               <Icon name="upload" size={16} />
-              导入配置
+              {t('shell.importConfig')}
               <input
                 type="file"
                 accept="application/json,.json"
@@ -143,9 +147,9 @@ export function AppShell({
             </label>
             <button className="button button-secondary" type="button" onClick={onExport}>
               <Icon name="download" size={16} />
-              导出配置
+              {t('shell.exportConfig')}
             </button>
-            {isSaving && <span className="saving-label">正在保存</span>}
+            {isSaving && <span className="saving-label">{t('shell.saving')}</span>}
           </div>
         </header>
 

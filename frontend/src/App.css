@@ -384,6 +384,28 @@
   background: var(--paper);
 }
 
+
+.language-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 37px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #687884;
+  background: var(--paper);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.language-switcher:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
 .import-button {
   position: relative;
   overflow: hidden;

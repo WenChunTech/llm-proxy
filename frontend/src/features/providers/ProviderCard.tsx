@@ -1,4 +1,5 @@
 import { Icon } from '../../components/Icon'
+import { useI18n } from '../../lib/i18n'
 import { providerMeta, providerMarkText, effectiveBaseUrlForProvider } from '../../config/providers'
 import type { ListMoveAction } from '../../lib/list'
 import type { AuthProviderKind, AuthValidationTarget, Provider } from '../../types/domain'
@@ -50,6 +51,7 @@ export function ProviderCard({
   authValidating?: boolean
   authProgress?: { completed: number; total: number; label: string } | null
 }) {
+  const { t } = useI18n()
   const meta = providerMeta[provider.kind]
   const effectiveBaseUrl = effectiveBaseUrlForProvider(provider)
   const canValidateAuth = Boolean(onValidateAuth && authTargets?.length && (provider.kind === 'codex' || provider.kind === 'grok'))
@@ -86,8 +88,8 @@ export function ProviderCard({
         <button
           className="priority-drag-handle"
           type="button"
-          title={canReorder ? `拖动调整 ${provider.name} 优先级` : '仅一条配置时无需排序'}
-          aria-label={canReorder ? `拖动调整 ${provider.name} 优先级` : '仅一条配置时无需排序'}
+          title={canReorder ? t('card.dragPriority', { name: provider.name }) : t('card.noReorder')}
+          aria-label={canReorder ? t('card.dragPriority', { name: provider.name }) : t('card.noReorder')}
           disabled={!canReorder}
         >
           <Icon name="grip" size={15} />
@@ -97,7 +99,7 @@ export function ProviderCard({
           <button
             className="icon-button subtle"
             type="button"
-            title="置顶"
+            title={t('card.toTop')}
             disabled={!canReorder || priorityIndex === 0}
             onClick={() => onMove?.('top')}
           >
@@ -106,7 +108,7 @@ export function ProviderCard({
           <button
             className="icon-button subtle"
             type="button"
-            title="提高优先级"
+            title={t('card.raise')}
             disabled={!canReorder || priorityIndex === 0}
             onClick={() => onMove?.(-1)}
           >
@@ -115,7 +117,7 @@ export function ProviderCard({
           <button
             className="icon-button subtle"
             type="button"
-            title="降低优先级"
+            title={t('card.lower')}
             disabled={!canReorder || priorityIndex >= priorityTotal - 1}
             onClick={() => onMove?.(1)}
           >
@@ -124,7 +126,7 @@ export function ProviderCard({
           <button
             className="icon-button subtle"
             type="button"
-            title="置底"
+            title={t('card.toBottom')}
             disabled={!canReorder || priorityIndex >= priorityTotal - 1}
             onClick={() => onMove?.('bottom')}
           >
@@ -137,32 +139,32 @@ export function ProviderCard({
         <div className="provider-card-copy">
           <div className="provider-title-row">
             <h3>{provider.name}</h3>
-            <span className={`status-badge ${provider.enabled ? 'enabled' : 'disabled'}`}>{provider.enabled ? '已启用' : '已停用'}</span>
+            <span className={`status-badge ${provider.enabled ? 'enabled' : 'disabled'}`}>{provider.enabled ? t('card.enabled') : t('card.disabled')}</span>
           </div>
           <span className="provider-type">{meta.label} <i /> {meta.description}</span>
-          <div className="provider-url"><Icon name="external" size={14} /><code>{effectiveBaseUrl || 'base_url 未配置'}</code></div>
+          <div className="provider-url"><Icon name="external" size={14} /><code>{effectiveBaseUrl || t('card.baseUrlNotConfigured')}</code></div>
           {authStats && (
             <div className="provider-auth-overview">
               <div className="provider-auth-total-row">
                 <span>AUTH <b>{authStats.total}</b></span>
-                <code>{authStats.enabled} 启用 + {authStats.disabled} 禁用</code>
+                <code>{t('card.authSummary', { enabled: authStats.enabled, disabled: authStats.disabled })}</code>
               </div>
               <div className="provider-auth-meter" aria-hidden="true">
                 <span className="enabled" style={{ width: enabledAuthPercent }} />
                 <span className="disabled" style={{ width: disabledAuthPercent }} />
               </div>
               <div className="provider-auth-stats">
-                <span className="auth-stat enabled">启用 <b>{authStats.enabled}</b></span>
-                <span className="auth-stat valid">有效 <b>{authStats.valid}</b></span>
-                <span className="auth-stat invalid">无效 <b>{authStats.invalid}</b></span>
-                {authStats.rateLimited > 0 && <span className="auth-stat limited">限流 <b>{authStats.rateLimited}</b></span>}
-                {authStats.unchecked > 0 && <span className="auth-stat unchecked">待校验 <b>{authStats.unchecked}</b></span>}
-                <span className="auth-stat disabled">禁用 <b>{authStats.disabled}</b></span>
+                <span className="auth-stat enabled">{t('card.enabled')} <b>{authStats.enabled}</b></span>
+                <span className="auth-stat valid">{t('card.valid')} <b>{authStats.valid}</b></span>
+                <span className="auth-stat invalid">{t('card.invalid')} <b>{authStats.invalid}</b></span>
+                {authStats.rateLimited > 0 && <span className="auth-stat limited">{t('card.rateLimited')} <b>{authStats.rateLimited}</b></span>}
+                {authStats.unchecked > 0 && <span className="auth-stat unchecked">{t('card.unchecked')} <b>{authStats.unchecked}</b></span>}
+                <span className="auth-stat disabled">{t('card.disabledLabel')} <b>{authStats.disabled}</b></span>
               </div>
               {authValidating && (
                 <div className="provider-auth-progress" aria-live="polite">
                   <div className="provider-auth-progress-row">
-                    <strong>校验中</strong>
+                    <strong>{t('card.validating')}</strong>
                     <code>
                       {authProgress && authProgress.total > 0
                         ? `${authProgress.completed}/${authProgress.total}`
@@ -192,7 +194,7 @@ export function ProviderCard({
         <span className="section-label">MODELS <b>{provider.models.length}</b></span>
         <div className="chip-list">
           {provider.models.map((model) => <span className="model-chip" key={model}>{model}</span>)}
-          {!provider.models.length && <span className="muted-copy">尚未添加模型</span>}
+          {!provider.models.length && <span className="muted-copy">{t('card.noModels')}</span>}
         </div>
       </div>
       <div className="provider-card-actions">
@@ -202,20 +204,20 @@ export function ProviderCard({
             type="button"
             disabled={authValidating}
             onClick={() => onValidateAuth?.(provider.kind as AuthProviderKind, authTargets ?? [])}
-            title={authValidating ? '校验进行中' : '校验当前配置'}
+            title={authValidating ? t('card.validatingInProgress') : t('card.validateConfig')}
           >
             <Icon name={authValidating ? 'pulse' : 'check'} size={15} />
             {authValidating
               ? authProgress && authProgress.total > 0
                 ? `${authProgress.completed}/${authProgress.total}`
-                : '校验中'
-              : '校验'}
+                : t('card.validating')
+              : t('card.validate')}
           </button>
         )}
-        <button className={`toggle ${provider.enabled ? 'on' : ''}`} type="button" aria-label={provider.enabled ? '停用提供商' : '启用提供商'} onClick={() => onToggle(provider.id)}><span /></button>
-        <button className="icon-button" type="button" title="编辑提供商" onClick={() => onEdit(provider)}><Icon name="edit" size={16} /></button>
-        <button className="icon-button provider-clone-button" type="button" title="克隆配置（创建副本）" aria-label="克隆配置" onClick={() => onCopy(provider)}><Icon name="copy" size={16} /></button>
-        <button className="icon-button danger-button" type="button" title="删除提供商" onClick={() => onDelete(provider.id)}><Icon name="trash" size={16} /></button>
+        <button className={`toggle ${provider.enabled ? 'on' : ''}`} type="button" aria-label={provider.enabled ? t('card.disableProvider') : t('card.enableProvider')} onClick={() => onToggle(provider.id)}><span /></button>
+        <button className="icon-button" type="button" title={t('card.editProvider')} onClick={() => onEdit(provider)}><Icon name="edit" size={16} /></button>
+        <button className="icon-button provider-clone-button" type="button" title={t('card.cloneProvider')} aria-label={t('card.cloneProvider')} onClick={() => onCopy(provider)}><Icon name="copy" size={16} /></button>
+        <button className="icon-button danger-button" type="button" title={t('card.deleteProvider')} onClick={() => onDelete(provider.id)}><Icon name="trash" size={16} /></button>
       </div>
     </article>
   )

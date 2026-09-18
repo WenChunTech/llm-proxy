@@ -17,6 +17,7 @@ import { useAuthValidation } from './hooks/useAuthValidation'
 import { useDashboardConfig } from './hooks/useDashboardConfig'
 import { useThemeMode } from './hooks/useThemeMode'
 import { useToast } from './hooks/useToast'
+import { useI18n } from './lib/i18n'
 import type {
   Provider,
   ProviderDraft,
@@ -26,6 +27,7 @@ import type {
 } from './types/domain'
 
 function App() {
+  const { t } = useI18n()
   const [view, setView] = useState<View>('providers')
   const { themeMode, setThemeMode } = useThemeMode()
   const { toast, setToast } = useToast()
@@ -60,7 +62,7 @@ function App() {
     setEditingId(null)
     setEditingProvider({
       kind,
-      name: 'New provider',
+      name: t('app.newProvider'),
       baseUrl: defaultBaseUrlForNewProvider(kind),
       apiKey: '',
       models: [],
@@ -73,7 +75,7 @@ function App() {
     setEditingId(null)
     setEditingProvider({
       ...provider,
-      name: `${provider.name} copy`,
+      name: t('app.providerCopy', { name: provider.name }),
       kind: provider.kind,
     })
   }

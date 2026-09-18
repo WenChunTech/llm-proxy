@@ -25,6 +25,7 @@ import type {
   ProviderModelsPayload,
   ProviderTestPayload,
 } from '../../types/domain'
+import { useI18n } from '../../lib/i18n'
 
 
 function stringifyHeaders(headers: Record<string, string>) {
@@ -48,6 +49,7 @@ export function ProviderModal({
   onClose: () => void
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
 }) {
+  const { t } = useI18n()
   const [modelInput, setModelInput] = useState('')
   const [modelSearch, setModelSearch] = useState('')
   const [showSelectedModelsOnly, setShowSelectedModelsOnly] = useState(false)
@@ -207,14 +209,14 @@ export function ProviderModal({
     try {
       const parsed = JSON.parse(trimmed)
       if (!isRecord(parsed)) {
-        setHeadersError('Headers JSON 必须是对象，例如 {"X-Custom":"value"}')
+        setHeadersError(t('modal.headersMustBeObject'))
         return
       }
       const nextHeaders: Record<string, string> = {}
       for (const [name, headerValue] of Object.entries(parsed)) {
         const key = name.trim()
         if (!key) {
-          setHeadersError('Header 名称不能为空')
+          setHeadersError(t('modal.headerNameEmpty'))
           return
         }
         if (typeof headerValue === 'string') {
@@ -225,13 +227,13 @@ export function ProviderModal({
           nextHeaders[key] = String(headerValue)
           continue
         }
-        setHeadersError('Header 值必须是字符串')
+        setHeadersError(t('modal.headerValueString'))
         return
       }
       onChange({ ...provider, headers: nextHeaders })
       setHeadersError('')
     } catch {
-      setHeadersError('JSON 格式无效')
+      setHeadersError(t('modal.jsonInvalid'))
     }
   }
 
@@ -253,13 +255,13 @@ export function ProviderModal({
     const trimmed = value.trim()
     if (!trimmed) {
       onChange({ ...provider, auth: undefined })
-      setAuthError(needsAuthJson ? 'auth JSON 不能为空' : '')
+      setAuthError(needsAuthJson ? t('modal.authEmpty') : '')
       return
     }
     try {
       const parsed = JSON.parse(trimmed)
       if (!Array.isArray(parsed) && !isRecord(parsed)) {
-        setAuthError('Auth JSON 必须是对象或数组')
+        setAuthError(t('modal.authMustBeObjectOrArray'))
         return
       }
       onChange({
@@ -268,7 +270,7 @@ export function ProviderModal({
       })
       setAuthError('')
     } catch {
-      setAuthError('JSON 格式无效')
+      setAuthError(t('modal.jsonInvalid'))
     }
   }
 
@@ -277,7 +279,7 @@ export function ProviderModal({
     try {
       const values = await readJsonFiles(files)
       if (!values.every((value) => isRecord(value))) {
-        setAuthError('Auth JSON 必须是对象或对象数组')
+        setAuthError(t('modal.authMustBeObjectOrArrayPlural'))
         return
       }
       const nextAuth = values.length === 1 ? values[0] : values
@@ -289,7 +291,7 @@ export function ProviderModal({
       })
       setAuthError('')
     } catch {
-      setAuthError('JSON 文件读取失败')
+      setAuthError(t('modal.authFileReadFailed'))
     }
   }
 
@@ -298,7 +300,7 @@ export function ProviderModal({
     const model = selected && provider.models.includes(selected) ? selected : provider.models[0]
     if (!model) {
       setTestStatus('error')
-      setTestMessage('请先选择或添加模型')
+      setTestMessage(t('modal.selectOrAddModel'))
       return
     }
     setTestStatus('loading')
@@ -318,7 +320,7 @@ export function ProviderModal({
       if (testStream) {
         const rawBody = await readResponseStream(response, setTestRawData)
         setTestStatus(response.ok ? 'ok' : 'error')
-        setTestMessage(response.ok ? `检测通过，HTTP ${response.status}` : `检测失败，HTTP ${response.status}`)
+        setTestMessage(response.ok ? t('modal.detectPassed', { status: response.status }) : t('modal.detectFailed', { status: response.status }))
         setTestRawData(rawBody)
         return
       }
@@ -326,11 +328,11 @@ export function ProviderModal({
       if (!response.ok) throw new Error('error' in payload ? payload.error?.message : '')
       const result = payload as ProviderTestPayload
       setTestStatus(result.ok ? 'ok' : 'error')
-      setTestMessage(result.ok ? `检测通过，HTTP ${result.status}` : `检测失败，HTTP ${result.status}`)
+      setTestMessage(result.ok ? t('modal.detectPassed', { status: result.status }) : t('modal.detectFailed', { status: result.status }))
       setTestRawData(result.raw_body || result.body_preview || '')
     } catch (error) {
       setTestStatus('error')
-      setTestMessage(error instanceof Error && error.message ? error.message : '检测失败')
+      setTestMessage(error instanceof Error && error.message ? error.message : t('modal.detectFailedShort'))
       setTestRawData('')
     }
   }
@@ -339,33 +341,33 @@ export function ProviderModal({
     const selected = testModel.trim()
     const model = selected && provider.models.includes(selected) ? selected : provider.models[0]
     if (!model) {
-      setCurlCopyStatus('请先选择或添加模型')
+      setCurlCopyStatus(t('modal.selectOrAddModel'))
       return
     }
     const command = buildProviderTestCurl(provider, model, testPrompt.trim() || 'hello', testStream)
     try {
       await copyText(command)
-      setCurlCopyStatus('curl 已复制')
+      setCurlCopyStatus(t('modal.curlCopied'))
       window.setTimeout(() => setCurlCopyStatus(''), 1800)
     } catch {
-      setCurlCopyStatus('复制失败')
+      setCurlCopyStatus(t('modal.copyFailed'))
     }
   }
 
   return (
     <div className="llm-modal-backdrop" onMouseDown={onClose}>
       <form className="modal provider-modal" onSubmit={onSubmit} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="modal-heading"><div><span className="eyebrow">UPSTREAM CONFIG</span><h2>{isEditing ? '编辑提供商' : '添加提供商'}</h2></div><button className="icon-button" type="button" title="关闭" onClick={onClose}>×</button></div>
+        <div className="modal-heading"><div><span className="eyebrow">{t('modal.eyebrow')}</span><h2>{isEditing ? t('modal.editTitle') : t('modal.addTitle')}</h2></div><button className="icon-button" type="button" title={t('modal.close')} onClick={onClose}>×</button></div>
         <div className="provider-modal-layout">
           <section className="config-section">
             <div className="config-section-heading">
-              <span className="eyebrow">CONNECTION</span>
-              <h3>连接信息</h3>
+              <span className="eyebrow">{t('modal.connectionEyebrow')}</span>
+              <h3>{t('modal.connectionTitle')}</h3>
             </div>
             <div className="form-grid">
-              <label className="field"><span>显示名称</span><input required value={provider.name} onChange={(event) => onChange({ ...provider, name: event.target.value })} placeholder="例如 Primary Claude" /></label>
+              <label className="field"><span>{t('modal.displayName')}</span><input required value={provider.name} onChange={(event) => onChange({ ...provider, name: event.target.value })} placeholder={t("modal.displayNamePlaceholder")} /></label>
               <div className="field">
-                <span>提供商类型</span>
+                <span>{t('modal.providerType')}</span>
                 <SelectControl
                   value={provider.kind}
                   options={editableNewKinds.map((kind) => ({
@@ -375,28 +377,28 @@ export function ProviderModal({
                   }))}
                   onChange={changeKind}
                   disabled={!allowKindChange}
-                  ariaLabel="选择提供商类型"
+                  ariaLabel={t("modal.selectProviderType")}
                 />
               </div>
             </div>
             <label className="field">
-              <span>Base URL</span>
+              <span>{t('modal.baseUrl')}</span>
               <input
                 required={!supportsAuthJson}
                 value={provider.baseUrl}
                 onChange={(event) => onChange({ ...provider, baseUrl: event.target.value })}
-                placeholder={supportsAuthJson ? '留空则使用 auth.base_url 或默认地址' : 'https://api.example.com/v1'}
+                placeholder={supportsAuthJson ? t("modal.baseUrlAuthPlaceholder") : t("modal.baseUrlPlaceholder")}
               />
               {supportsAuthJson && (
-                <small>当前请求地址：{providerEffectiveBaseUrl}</small>
+                <small>{t('modal.currentEndpoint', { url: providerEffectiveBaseUrl })}</small>
               )}
             </label>
-            <label className="field"><span>API Key</span><input type="password" autoComplete="current-password" value={provider.apiKey} onChange={(event) => onChange({ ...provider, apiKey: event.target.value })} placeholder="输入上游访问密钥" /></label>
+            <label className="field"><span>{t('modal.apiKey')}</span><input type="password" autoComplete="current-password" value={provider.apiKey} onChange={(event) => onChange({ ...provider, apiKey: event.target.value })} placeholder={t('modal.apiKeyPlaceholder')} /></label>
           </section>
           <section className="config-section">
             <div className="config-section-heading">
-              <span className="eyebrow">HEADERS</span>
-              <h3>自定义 Headers</h3>
+              <span className="eyebrow">{t('modal.headersEyebrow')}</span>
+              <h3>{t('modal.headersTitle')}</h3>
             </div>
             <div className="header-editor">
               <textarea
@@ -410,8 +412,8 @@ export function ProviderModal({
               ) : (
                 <span className="model-sync-status muted-copy">
                   {supportsAuthJson
-                    ? 'JSON 对象格式；与 auth headers 冲突时优先使用此处的自定义 headers'
-                    : 'JSON 对象格式，例如 {"X-Custom-Header":"value"}'}
+                    ? t('modal.headersHintAuth')
+                    : t('modal.headersHint')}
                 </span>
               )}
             </div>
@@ -420,13 +422,13 @@ export function ProviderModal({
             <section className="config-section">
               <div className="config-section-heading">
                 <span className="eyebrow">AUTH</span>
-                <h3>认证 JSON</h3>
+                <h3>{t('modal.authTitle')}</h3>
               </div>
               <div className="auth-editor">
                 <div className="auth-actions">
                   <label className="button button-secondary import-button compact">
                     <Icon name="upload" size={15} />
-                    JSON 文件
+                    {t('modal.jsonFile')}
                     <input
                       type="file"
                       accept="application/json,.json"
@@ -438,7 +440,7 @@ export function ProviderModal({
                   </label>
                   <label className="button button-secondary import-button compact">
                     <Icon name="upload" size={15} />
-                    JSON 目录
+                    {t('modal.jsonDir')}
                     <input
                       type="file"
                       accept="application/json,.json"
@@ -454,13 +456,13 @@ export function ProviderModal({
                 <textarea
                   value={authJson}
                   onChange={(event) => updateAuthJson(event.target.value)}
-                  placeholder='{"access_token":"..."} 或 [{"access_token":"..."}]'
+                  placeholder={t('modal.authPlaceholder')}
                 />
                 {authError ? (
                   <span className="model-sync-status muted-copy">{authError}</span>
                 ) : (
                   <span className="model-sync-status muted-copy">
-                    可与 API Key 同时配置；运行时失败会轮询 API Key 与 enabled auth。模型测试在已配置 API Key 时仅测 API Key
+                    t('modal.authHint')
                   </span>
                 )}
               </div>
@@ -469,8 +471,8 @@ export function ProviderModal({
           <section className="config-section">
             <div className="config-section-heading">
               <div>
-                <span className="eyebrow">MODELS</span>
-                <h3>模型清单</h3>
+                <span className="eyebrow">{t('modal.modelsEyebrow')}</span>
+                <h3>{t('modal.modelsTitle')}</h3>
               </div>
               <button
                 className="button button-secondary compact-model-sync-button"
@@ -479,7 +481,7 @@ export function ProviderModal({
                 onClick={() => void syncProviderModels()}
               >
                 <Icon name="download" size={15} />
-                {modelStatus === 'loading' ? '拉取中' : '拉取模型'}
+                {modelStatus === 'loading' ? t('modal.fetching') : t('modal.fetchModels')}
               </button>
             </div>
             <div className="model-editor">
@@ -488,13 +490,13 @@ export function ProviderModal({
                   value={modelInput}
                   onChange={(event) => setModelInput(event.target.value)}
                   onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addModel() } }}
-                  placeholder="输入模型名称"
+                  placeholder={t("modal.modelPlaceholder")}
                 />
-                <button className="icon-button accent-button" type="button" title="添加模型" onClick={addModel}><Icon name="plus" size={16} /></button>
+                <button className="icon-button accent-button" type="button" title={t("modal.addModel")} onClick={addModel}><Icon name="plus" size={16} /></button>
               </div>
               {modelEndpoint && (
                 <div className="model-endpoint-row">
-                  <span>Models URL</span>
+                  <span>{t('modal.modelsUrl')}</span>
                   <code>{modelEndpoint}</code>
                 </div>
               )}
@@ -502,26 +504,26 @@ export function ProviderModal({
                 <div className="model-option-panel">
                   <div className="model-option-toolbar">
                     <div>
-                      <strong>已选择 {provider.models.length} 个 / 共 {modelOptionList.length} 个</strong>
-                      <span>{filteredModelOptions.length} 个当前可见，{visibleSelectedCount} 个已选</span>
+                      <strong>{t('modal.modelSummary', { selected: provider.models.length, total: modelOptionList.length })}</strong>
+                      <span>{t('modal.modelVisibleSummary', { visible: filteredModelOptions.length, selected: visibleSelectedCount })}</span>
                     </div>
                     <label className="model-search-field">
                       <Icon name="search" size={14} />
                       <input
                         value={modelSearch}
                         onChange={(event) => setModelSearch(event.target.value)}
-                        placeholder="搜索模型"
+                        placeholder={t("modal.searchModels")}
                       />
                     </label>
                     <div className="model-option-actions">
                       <button className="text-button" type="button" onClick={() => setVisibleModelsChecked(true)}>
-                        全选当前
+                        {t('modal.selectAll')}
                       </button>
                       <button className="text-button" type="button" onClick={() => setVisibleModelsChecked(false)}>
-                        取消选择
+                        {t('modal.deselectAll')}
                       </button>
                       <button className="text-button danger-text" type="button" onClick={clearSelectedModels}>
-                        清空已选
+                        {t('modal.clearSelected')}
                       </button>
                     </div>
                   </div>
@@ -531,7 +533,7 @@ export function ProviderModal({
                       checked={showSelectedModelsOnly}
                       onChange={(event) => setShowSelectedModelsOnly(event.target.checked)}
                     />
-                    <span>仅显示已选模型</span>
+                    <span>{t('modal.showSelectedOnly')}</span>
                   </label>
                   <div className="model-option-list selectable">
                     {filteredModelOptions.map((model) => {
@@ -548,46 +550,46 @@ export function ProviderModal({
                       )
                     })}
                     {!filteredModelOptions.length && (
-                      <span className="model-sync-status muted-copy">没有匹配的模型</span>
+                      <span className="model-sync-status muted-copy">{t('modal.noMatch')}</span>
                     )}
                   </div>
                 </div>
               )}
               {modelStatus === 'waiting' && (
-                <span className="model-sync-status muted-copy">等待 Base URL</span>
+                <span className="model-sync-status muted-copy">{t('modal.waitingBaseUrl')}</span>
               )}
               {modelStatus === 'loading' && (
-                <span className="model-sync-status muted-copy">正在同步上游模型</span>
+                <span className="model-sync-status muted-copy">{t('modal.syncingModels')}</span>
               )}
               {modelStatus === 'ready' && !modelOptionList.length && (
-                <span className="model-sync-status muted-copy">上游没有返回可选模型</span>
+                <span className="model-sync-status muted-copy">{t('modal.noUpstreamModels')}</span>
               )}
               {modelStatus === 'error' && (
-                <span className="model-sync-status muted-copy">模型同步失败，可手动输入</span>
+                <span className="model-sync-status muted-copy">{t('modal.syncFailed')}</span>
               )}
-              <div className="chip-list editor-chips">{provider.models.map((model) => <span className="model-chip" key={model}>{model}<button type="button" aria-label={`移除 ${model}`} onClick={() => removeModel(model)}>×</button></span>)}</div>
+              <div className="chip-list editor-chips">{provider.models.map((model) => <span className="model-chip" key={model}>{model}<button type="button" aria-label={t('modal.removeModel', { model })} onClick={() => removeModel(model)}>×</button></span>)}</div>
             </div>
           </section>
           <section className="config-section provider-test-section">
             <div className="config-section-heading">
-              <span className="eyebrow">TEST REQUEST</span>
-              <h3>测试模型</h3>
+              <span className="eyebrow">{t('modal.testEyebrow')}</span>
+              <h3>{t('modal.testTitle')}</h3>
             </div>
             <div className="provider-test-panel">
               <div className="provider-test-toolbar">
                 <div className="field compact-field provider-test-model-field">
-                  <span>模型</span>
+                  <span>{t('modal.model')}</span>
                   <SelectControl
                     mono
                     value={testModel}
                     options={
                       testModelOptions.length
                         ? testModelOptions.map((model) => ({ value: model, label: model }))
-                        : [{ value: '', label: '请先添加或同步模型' }]
+                        : [{ value: '', label: t('modal.addOrSyncFirst') }]
                     }
                     onChange={setTestModel}
                     disabled={!testModelOptions.length}
-                    ariaLabel="选择测试模型"
+                    ariaLabel={t("modal.selectTestModel")}
                   />
                 </div>
                 <label className="stream-toggle provider-test-stream-toggle">
@@ -596,16 +598,16 @@ export function ProviderModal({
                     checked={testStream}
                     onChange={(event) => setTestStream(event.target.checked)}
                   />
-                  <span>流式输出</span>
+                  <span>{t('modal.streamOutput')}</span>
                 </label>
               </div>
 
               <label className="field compact-field prompt-field">
-                <span>提示词</span>
+                <span>{t('modal.prompt')}</span>
                 <textarea
                   value={testPrompt}
                   onChange={(event) => setTestPrompt(event.target.value)}
-                  placeholder="输入测试提示词"
+                  placeholder={t("modal.promptPlaceholder")}
                 />
               </label>
 
@@ -618,11 +620,11 @@ export function ProviderModal({
                     onClick={testCurrentModel}
                   >
                     <Icon name="play" size={15} />
-                    {testStatus === 'loading' ? '检测中' : '检测模型'}
+                    {testStatus === 'loading' ? t('modal.detecting') : t('modal.detectModel')}
                   </button>
                   <button className="button button-secondary" type="button" onClick={copyTestCurl}>
                     <Icon name="copy" size={15} />
-                    复制 curl
+                    {t('modal.copyCurl')}
                   </button>
                 </div>
                 {(testMessage || curlCopyStatus) && (
@@ -633,14 +635,14 @@ export function ProviderModal({
               <div className="provider-test-enable-actions">
                 <div className="provider-test-enable-copy">
                   <strong className={provider.enabled ? 'is-enabled' : 'is-disabled'}>
-                    {provider.enabled ? '已启用' : '已禁用'}
+                    {provider.enabled ? t('modal.enabled') : t('modal.disabled')}
                   </strong>
                   <span>
                     {testStatus === 'ok'
-                      ? '检测通过，可启用提供商'
+                      ? t('modal.detectPassedEnable')
                       : testStatus === 'error'
-                        ? '检测失败，可禁用提供商'
-                        : '可随时启用或禁用提供商'}
+                        ? t('modal.detectFailedDisable')
+                        : t('modal.toggleAnytime')}
                   </span>
                 </div>
                 <div className="provider-test-enable-buttons">
@@ -651,7 +653,7 @@ export function ProviderModal({
                     onClick={() => onChange({ ...provider, enabled: true })}
                   >
                     <Icon name="check" size={15} />
-                    启用
+                    {t('modal.enable')}
                   </button>
                   <button
                     className={`button button-secondary ${!provider.enabled ? 'is-active-disable' : ''}`}
@@ -659,14 +661,14 @@ export function ProviderModal({
                     disabled={!provider.enabled}
                     onClick={() => onChange({ ...provider, enabled: false })}
                   >
-                    禁用
+                    {t('modal.disable')}
                   </button>
                 </div>
               </div>
 
               <div className="raw-response-panel">
                 <div className="raw-response-heading">
-                  <span>原始响应</span>
+                  <span>{t('modal.rawResponse')}</span>
                   <small>
                     {testRawData
                       ? `${testRawData.length} chars`
@@ -675,12 +677,12 @@ export function ProviderModal({
                         : 'non-stream'}
                   </small>
                 </div>
-                <pre>{testRawData || '暂无响应数据'}</pre>
+                <pre>{testRawData || t('modal.noResponseData')}</pre>
               </div>
             </div>
           </section>
         </div>
-        <div className="modal-actions"><button className="button button-secondary" type="button" onClick={onClose}>取消</button><button className="button button-primary" type="submit" disabled={!canSaveProvider}><Icon name="check" size={16} />保存配置</button></div>
+        <div className="modal-actions"><button className="button button-secondary" type="button" onClick={onClose}>{t('modal.cancel')}</button><button className="button button-primary" type="submit" disabled={!canSaveProvider}><Icon name="check" size={16} />{t('modal.saveConfig')}</button></div>
       </form>
     </div>
   )

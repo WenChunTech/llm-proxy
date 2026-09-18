@@ -12,6 +12,7 @@ import {
   preferFile,
   type LogLevelPreset,
 } from './format'
+import { useI18n } from '../../lib/i18n'
 import type { DumpDeletePayload, DumpDetail, DumpListPayload, DumpSummary, PageTab } from './types'
 import { appendLiveChunk, useLogsSocket } from './useLogsSocket'
 import './logs.css'
@@ -32,6 +33,7 @@ export function LogsView({
     debugDump: DebugDumpConfig
   }) => void | Promise<void>
 }) {
+  const { t } = useI18n()
   const dumpEnabled = Boolean(debugDump?.enabled)
   const [pageTab, setPageTab] = useState<PageTab>(dumpEnabled ? 'dumps' : 'process')
   const [draftLogLevel, setDraftLogLevel] = useState<LogLevelPreset>(normalizeLogLevel(logLevel))
@@ -128,11 +130,11 @@ export function LogsView({
       const blob = await response.blob()
       downloadBlob('debug-dumps.zip', blob)
     } catch {
-      showActionHint('下载压缩包失败')
+      showActionHint(t('logs.downloadFailed'))
     } finally {
       setArchiving(false)
     }
-  }, [accessKey, showActionHint])
+  }, [accessKey, showActionHint, t])
 
   const loadList = useCallback(async (query = debouncedFilter) => {
     if (!dumpEnabled) {
@@ -164,11 +166,11 @@ export function LogsView({
         return nextItems[0]?.id ?? null
       })
     } catch (error) {
-      setListError(error instanceof Error ? error.message : '加载失败')
+      setListError(error instanceof Error ? error.message : t('logs.loadFailed'))
     } finally {
       setLoadingList(false)
     }
-  }, [accessKey, debouncedFilter, dumpEnabled])
+  }, [accessKey, debouncedFilter, dumpEnabled, t])
 
   const scheduleReloadList = useCallback(() => {
     if (reloadTimerRef.current !== null) {
@@ -202,12 +204,12 @@ export function LogsView({
         })
       } catch (error) {
         setDetail(null)
-        setListError(error instanceof Error ? error.message : '加载详情失败')
+        setListError(error instanceof Error ? error.message : t('logs.loadDetailFailed'))
       } finally {
         setLoadingDetail(false)
       }
     },
-    [accessKey],
+    [accessKey, t],
   )
 
   useEffect(() => {
@@ -265,9 +267,9 @@ export function LogsView({
       if (!uniqueIds.length || deleting) return
 
       const labels = {
-        one: `再次点击删除该转储会话：${uniqueIds[0]}`,
-        selected: `再次点击删除选中的 ${uniqueIds.length} 个转储会话`,
-        filtered: `再次点击删除当前筛选结果中的 ${uniqueIds.length} 个转储会话`,
+        one: t('logs.confirmDeleteOne', { id: uniqueIds[0] }),
+        selected: t('logs.confirmDeleteSelected', { count: uniqueIds.length }),
+        filtered: t('logs.confirmDeleteFiltered', { count: uniqueIds.length }),
       }
       const deleteKey = `${mode}:${uniqueIds.join(',')}`
       if (pendingDelete?.key !== deleteKey) {
@@ -301,18 +303,18 @@ export function LogsView({
         const failed = Array.isArray(payload.failed) ? payload.failed : []
         removeLocalDumps(deleted)
         if (failed.length) {
-          setListError(`部分删除失败：${failed.map((item) => item.id || item.error || 'unknown').join(', ')}`)
+          setListError(t('logs.partialDeleteFailed', { details: failed.map((item) => item.id || item.error || 'unknown').join(', ') }))
           scheduleReloadList()
         } else {
-          showActionHint(`已删除 ${deleted.length} 个会话`)
+          showActionHint(t('logs.deletedCount', { count: deleted.length }))
         }
       } catch (error) {
-        setListError(error instanceof Error ? error.message : '删除失败')
+        setListError(error instanceof Error ? error.message : t('logs.deleteFailed'))
       } finally {
         setDeleting(false)
       }
     },
-    [accessKey, deleting, pendingDelete?.key, removeLocalDumps, scheduleReloadList, showActionHint],
+    [accessKey, deleting, pendingDelete?.key, removeLocalDumps, scheduleReloadList, showActionHint, t],
   )
 
   const { connection, processLines, setProcessLines } = useLogsSocket({
@@ -384,24 +386,24 @@ export function LogsView({
     <section className="logs-page">
       <section className="page-intro">
         <div>
-          <span className="eyebrow">Runtime</span>
-          <h2>请求日志</h2>
+          <span className="eyebrow">{t('logs.eyebrow')}</span>
+          <h2>{t('logs.title')}</h2>
           <p>
             {dumpEnabled
-              ? '查看、搜索并管理请求/响应转储与进程输出'
-              : '查看实时进程输出 可在日志配置中调整等级或启用请求转储'}
+              ? t('logs.descEnabled')
+              : t('logs.descDisabled')}
           </p>
         </div>
         {dumpEnabled ? (
-          <div className="logs-dir-badge" title={`debug_dump 目录：${dumpsDir}`}>
+          <div className="logs-dir-badge" title={t('logs.dumpDirTitle', { dir: dumpsDir })}>
             <span className="status-dot" />
-            <span>转储目录</span>
+            {t('logs.dumpDir')}
             <code>{dumpsDir}</code>
           </div>
         ) : (
           <div className="logs-dir-badge is-muted">
             <span className="status-dot" />
-            <span>请求转储未启用</span>
+            {t('logs.dumpDisabled')}
           </div>
         )}
       </section>
@@ -414,7 +416,7 @@ export function LogsView({
               className={pageTab === 'dumps' ? 'selected' : ''}
               onClick={() => setPageTab('dumps')}
             >
-              请求转储
+              {t('logs.tabDumps')}
               <span>{items.length}</span>
             </button>
           )}
@@ -423,7 +425,7 @@ export function LogsView({
             className={pageTab === 'process' ? 'selected' : ''}
             onClick={() => setPageTab('process')}
           >
-            进程日志
+            {t('logs.tabProcess')}
             <span>{processLines.length}</span>
           </button>
           <button
@@ -431,7 +433,7 @@ export function LogsView({
             className={pageTab === 'settings' ? 'selected' : ''}
             onClick={() => setPageTab('settings')}
           >
-            日志配置
+            {t('logs.tabSettings')}
           </button>
         </div>
 
@@ -449,7 +451,7 @@ export function LogsView({
                 <input
                   value={listFilter}
                   onChange={(event) => setListFilter(event.target.value)}
-                  placeholder="搜索：模型 / 提供商 / 请求体 / 响应体"
+                  placeholder={t("logs.searchDumps")}
                 />
               </label>
               <button
@@ -459,7 +461,7 @@ export function LogsView({
                 onClick={() => void downloadArchive()}
               >
                 <Icon name="download" size={15} />
-                下载压缩包
+                {t('logs.downloadArchive')}
               </button>
               <button
                 className="button button-secondary"
@@ -467,7 +469,7 @@ export function LogsView({
                 disabled={loadingList || deleting}
                 onClick={() => void loadList(listFilter)}
               >
-                刷新列表
+                {t('logs.refreshList')}
               </button>
               <button
                 className="button button-secondary danger-action"
@@ -476,7 +478,7 @@ export function LogsView({
                 onClick={() => void deleteDumps(selectedIds, 'selected')}
               >
                 <Icon name="trash" size={15} />
-                删除选中
+                {t('logs.deleteSelected')}
                 {selectedIds.length ? ` (${selectedIds.length})` : ''}
               </button>
               <button
@@ -486,7 +488,7 @@ export function LogsView({
                 onClick={() => void deleteDumps(items.map((item) => item.id), 'filtered')}
               >
                 <Icon name="trash" size={15} />
-                删除筛选结果
+                {t('logs.deleteFiltered')}
                 {items.length ? ` (${items.length})` : ''}
               </button>
             </>
@@ -498,7 +500,7 @@ export function LogsView({
                 <input
                   value={processFilter}
                   onChange={(event) => setProcessFilter(event.target.value)}
-                  placeholder="关键字搜索进程日志"
+                  placeholder={t("logs.searchProcess")}
                 />
               </label>
               <button
@@ -506,14 +508,14 @@ export function LogsView({
                 type="button"
                 onClick={() => setAutoScroll((value) => !value)}
               >
-                自动滚动
+                {t('logs.autoScroll')}
               </button>
               <button
                 className="button button-secondary"
                 type="button"
                 onClick={() => setProcessLines([])}
               >
-                清空
+                {t('logs.clear')}
               </button>
               <button
                 className="button button-primary"
@@ -527,7 +529,7 @@ export function LogsView({
                 }
               >
                 <Icon name="download" size={15} />
-                保存
+                {t('logs.save')}
               </button>
             </>
           )}
