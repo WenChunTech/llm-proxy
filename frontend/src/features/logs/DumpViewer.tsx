@@ -7,7 +7,6 @@ import {
   filterLinesByKeyword,
   formatBytes,
   formatDumpTime,
-  scrollNode,
   statusClass,
 } from './format'
 import { highlightKeywordInHtml, renderHighlighted } from './highlight'
@@ -333,30 +332,6 @@ export function DumpViewer({
                       __html: activeHtml || (contentFilter.trim() ? t('dump.noMatchContent') : ' '),
                     }}
                   />
-                  <div className="logs-scroll-actions" aria-label={t('dump.scrollControl')}>
-                    <button
-                      className="button button-secondary logs-scroll-button"
-                      type="button"
-                      title={t('dump.toTop')}
-                      onClick={() => {
-                        requestAnimationFrame(() => scrollNode(dumpCodeRef.current, 'top'))
-                      }}
-                    >
-                      <Icon name="toTop" size={14} />
-                      {t('dump.toTop')}
-                    </button>
-                    <button
-                      className="button button-secondary logs-scroll-button"
-                      type="button"
-                      title={t('dump.toBottom')}
-                      onClick={() => {
-                        requestAnimationFrame(() => scrollNode(dumpCodeRef.current, 'bottom'))
-                      }}
-                    >
-                      <Icon name="toBottom" size={14} />
-                      {t('dump.toBottom')}
-                    </button>
-                  </div>
                 </div>
               </div>
             ) : (

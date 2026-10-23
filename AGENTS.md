@@ -60,6 +60,7 @@ Read skill details only when the task needs them; keep project-local conventions
 - Prefer small, surgical diffs that match surrounding style.
 - Do not expand scope beyond the requested change.
 - Do not commit unless explicitly asked.
+- Update `README.md` (and `README.zh-CN.md`) before every commit so the user-facing docs reflect the current behavior.
 - Do not invent provider behavior; match existing protocol/provider semantics.
 - Keep protocol conversion in `converter`; keep HTTP/retry/config in `llm-proxy`.
 - Avoid `unwrap()` / `expect()` in production paths; tests may use them.
@@ -253,6 +254,7 @@ cargo build
 - [ ] No lock-across-await or blocking calls in async paths
 - [ ] Tests updated for changed pure logic
 - [ ] Frontend types/API mappers stay in sync with backend dashboard payloads
+- [ ] `README.md` / `README.zh-CN.md` updated when user-facing behavior changed
 - [ ] `cargo fmt` run (no unformatted code)
 - [ ] `cargo check` succeeds (compile clean)
 - [ ] `cargo test` passes

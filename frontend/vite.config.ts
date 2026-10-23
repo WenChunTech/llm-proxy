@@ -12,7 +12,7 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      '/api': backendTarget,
+      '/api': { target: backendTarget, ws: true },
       '/health': backendTarget,
       '/v1': backendTarget,
       '/v1beta': backendTarget,

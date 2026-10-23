@@ -9,11 +9,12 @@
   z-index: 10;
   display: flex;
   flex-direction: column;
-  width: 250px;
+  width: var(--sidebar-width, 250px);
   height: 100vh;
   padding: 28px 16px 18px;
-  color: #e7edf2;
-  background: var(--navy);
+  border-right: 1px solid var(--sb-edge);
+  color: var(--sb-ink);
+  background: var(--sb-bg);
   transition: width 180ms ease, padding 180ms ease;
 }
 
@@ -55,7 +56,7 @@
   margin-top: 2px;
   font-family: var(--mono);
   font-size: 11px;
-  color: #92a1b0;
+  color: var(--sb-dim);
   letter-spacing: 0.4px;
   text-transform: uppercase;
 }
@@ -70,17 +71,17 @@
   width: 30px;
   height: 30px;
   padding: 0;
-  border: 1px solid #2c4050;
+  border: 1px solid var(--sb-btn-border);
   border-radius: 7px;
-  color: #9fb0bf;
-  background: rgba(255, 255, 255, 0.03);
+  color: var(--sb-btn-ink);
+  background: var(--sb-btn-bg);
   transition: 160ms ease;
 }
 
 .sidebar-collapse-button:hover {
-  color: #f4f8fb;
-  border-color: #496173;
-  background: #223546;
+  color: var(--sb-btn-hover-ink);
+  border-color: var(--sb-btn-hover-border);
+  background: var(--sb-btn-hover-bg);
 }
 
 .eyebrow,
@@ -95,7 +96,7 @@
 
 .sidebar .eyebrow {
   padding: 0 11px;
-  color: #748595;
+  color: var(--sb-dim);
 }
 
 .nav-list {
@@ -119,7 +120,7 @@
   padding: 5px 8px;
   border: 0;
   border-radius: 6px;
-  color: #748595;
+  color: var(--sb-dim);
   font-size: 12px;
   text-align: left;
   background: transparent;
@@ -127,8 +128,8 @@
 }
 
 .provider-nav-toggle:hover {
-  color: #d8e2ea;
-  background: #1f3140;
+  color: var(--sb-ink);
+  background: var(--sb-hover-bg);
 }
 
 .provider-nav-toggle .icon {
@@ -151,7 +152,7 @@
   gap: 3px;
   margin: -1px 0 8px 30px;
   padding: 4px 0 6px 10px;
-  border-left: 1px solid #314252;
+  border-left: 1px solid var(--sb-edge);
 }
 
 .nav-item {
@@ -162,7 +163,7 @@
   padding: 10px 12px;
   border: 0;
   border-radius: 7px;
-  color: #92a2b2;
+  color: var(--sb-text);
   font-size: 14px;
   text-align: left;
   background: transparent;
@@ -170,14 +171,14 @@
 }
 
 .nav-item:hover {
-  color: #f1f5f7;
-  background: #223546;
+  color: var(--sb-ink);
+  background: var(--sb-hover-bg);
 }
 
 .nav-item.active {
-  color: #f8fffd;
-  background: #2b4854;
-  box-shadow: inset 3px 0 #e18266;
+  color: var(--sb-active-ink);
+  background: var(--sb-active-bg);
+  box-shadow: inset 3px 0 var(--sb-accent);
 }
 
 .nav-item span {
@@ -185,17 +186,17 @@
 }
 
 .nav-item small {
-  color: #8193a2;
+  color: var(--sb-dim);
 }
 
 .nav-item.active small {
-  color: #b0ded5;
+  color: var(--sb-active-count);
 }
 
 .nav-item .nav-chevron {
   display: inline-flex;
   flex: 0 0 auto;
-  color: #78909f;
+  color: var(--sb-dim);
   transition: transform 160ms ease;
 }
 
@@ -212,7 +213,7 @@
   padding: 5px 7px;
   border: 0;
   border-radius: 6px;
-  color: #8495a5;
+  color: var(--sb-text);
   font-size: 12px;
   text-align: left;
   background: transparent;
@@ -221,12 +222,12 @@
 
 .provider-nav-item:hover,
 .provider-nav-item.active {
-  color: #f1f5f7;
-  background: #223546;
+  color: var(--sb-ink);
+  background: var(--sb-hover-bg);
 }
 
 .provider-nav-item.active {
-  box-shadow: inset 2px 0 #e18266;
+  box-shadow: inset 2px 0 var(--sb-accent);
 }
 
 .provider-nav-item span:nth-child(2) {
@@ -238,7 +239,7 @@
 }
 
 .provider-nav-item small {
-  color: #708291;
+  color: var(--sb-dim);
   font-family: var(--mono);
   font-size: 11px;
 }
@@ -268,18 +269,65 @@
   padding: 17px 11px 0;
   font-family: var(--mono);
   font-size: 11px;
-  color: #718291;
+  color: var(--sb-dim);
 }
 
 .footer-dot {
-  color: #425562;
+  color: var(--sb-dim);
+  opacity: 0.55;
 }
 
 .main-content {
-  width: calc(100% - 250px);
+  width: calc(100% - var(--sidebar-width, 250px));
   min-height: 100vh;
-  margin-left: 250px;
+  margin-left: var(--sidebar-width, 250px);
   transition: width 180ms ease, margin-left 180ms ease;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 30;
+  width: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.sidebar-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 3px;
+  bottom: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 160ms ease;
+}
+
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle.is-dragging::after {
+  background: var(--teal);
+}
+
+.sidebar-is-collapsed .sidebar-resize-handle {
+  display: none;
+}
+
+body.is-resizing-sidebar {
+  cursor: col-resize;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.app-shell.is-resizing-sidebar .sidebar,
+.app-shell.is-resizing-sidebar .main-content {
+  transition: none;
 }
 
 .sidebar-is-collapsed .sidebar {
@@ -604,6 +652,10 @@
 .content-grid {
   display: grid;
   gap: 18px;
+}
+
+.content-grid > * {
+  min-width: 0;
 }
 
 .panel {
@@ -1130,9 +1182,10 @@ code {
 
 .provider-card {
   display: grid;
-  grid-template-columns: auto minmax(260px, 1.15fr) minmax(230px, 1fr) auto;
+  grid-template-columns: auto minmax(220px, 1.15fr) minmax(200px, 1fr) auto;
   align-items: center;
   gap: 22px;
+  min-width: 0;
   min-height: 119px;
   padding: 20px 21px;
 }
@@ -1315,6 +1368,7 @@ code {
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
   margin-top: 10px;
   overflow: hidden;
   color: #96a2ac;
@@ -1322,6 +1376,7 @@ code {
 
 .provider-url code {
   overflow: hidden;
+  min-width: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3568,7 +3623,7 @@ code {
   }
 
   .provider-card {
-    grid-template-columns: auto minmax(230px, 1fr) minmax(180px, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1.15fr) minmax(0, 1fr) auto;
     gap: 14px;
   }
 }
@@ -3579,6 +3634,10 @@ code {
     width: 100%;
     height: auto;
     padding: 16px;
+  }
+
+  .sidebar-resize-handle {
+    display: none;
   }
 
   .sidebar-is-collapsed .sidebar {
@@ -3636,7 +3695,7 @@ code {
     min-height: 34px;
     margin-left: 0;
     padding: 8px 10px;
-    color: #92a2b2;
+    color: var(--sb-text);
   }
 
   .provider-nav-groups {
@@ -3862,7 +3921,7 @@ code {
   }
 
   .provider-models {
-    margin: 18px 0 13px 55px;
+    margin: 18px 0 13px 0;
   }
 
   .provider-card-actions {

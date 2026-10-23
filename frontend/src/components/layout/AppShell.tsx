@@ -1,9 +1,17 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { Icon } from '../Icon'
 import { LanguageSwitcher } from '../LanguageSwitcher'
 import { ThemeSwitcher } from '../ThemeSwitcher'
 import { NavItem, ProviderNavGroups } from '../navigation'
 import { useI18n } from '../../lib/i18n'
+import {
+  SIDEBAR_WIDTH_DEFAULT,
+  SIDEBAR_WIDTH_MAX,
+  SIDEBAR_WIDTH_MIN,
+  persistSidebarWidth,
+  readStoredSidebarWidth,
+} from '../../lib/storage'
 import type { Provider, ProviderKindFilter, ThemeMode, View } from '../../types/domain'
 
 export function AppShell({
@@ -42,14 +50,54 @@ export function AppShell({
   children: ReactNode
 }) {
   const { t } = useI18n()
+  const [sidebarWidth, setSidebarWidth] = useState(() => readStoredSidebarWidth())
+  const [isResizing, setIsResizing] = useState(false)
+  const resizeOrigin = useRef<{ startX: number; startWidth: number } | null>(null)
   const pageTitle: Record<View, string> = {
     providers: t('shell.pageTitle.providers'),
     routing: t('shell.pageTitle.routing'),
     logs: t('shell.pageTitle.logs'),
   }
 
+  useEffect(() => {
+    if (!isResizing) return
+    document.body.classList.add('is-resizing-sidebar')
+    return () => document.body.classList.remove('is-resizing-sidebar')
+  }, [isResizing])
+
+  function handleResizeStart(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (sidebarCollapsed) return
+    resizeOrigin.current = { startX: event.clientX, startWidth: sidebarWidth }
+    setIsResizing(true)
+    event.currentTarget.setPointerCapture(event.pointerId)
+    event.currentTarget.classList.add('is-dragging')
+  }
+
+  function handleResizeMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    const origin = resizeOrigin.current
+    if (!origin) return
+    const maxWidth = Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, window.innerWidth - 340))
+    const nextWidth = Math.min(maxWidth, Math.max(SIDEBAR_WIDTH_MIN, origin.startWidth + event.clientX - origin.startX))
+    setSidebarWidth(nextWidth)
+  }
+
+  function handleResizeStop(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!resizeOrigin.current) return
+    resizeOrigin.current = null
+    setIsResizing(false)
+    event.currentTarget.classList.remove('is-dragging')
+    setSidebarWidth((width) => persistSidebarWidth(width))
+  }
+
+  function handleResizeReset() {
+    setSidebarWidth(persistSidebarWidth(SIDEBAR_WIDTH_DEFAULT))
+  }
+
   return (
-    <div className={`app-shell ${sidebarCollapsed ? 'sidebar-is-collapsed' : ''}`}>
+    <div
+      className={`app-shell ${sidebarCollapsed ? 'sidebar-is-collapsed' : ''} ${isResizing ? 'is-resizing-sidebar' : ''}`}
+      style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
+    >
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">L</div>
@@ -108,11 +156,28 @@ export function AppShell({
 
         <div className="sidebar-bottom">
           <div className="sidebar-footer">
-            <span>v0.1.16</span>
+            <span>v0.1.17</span>
             <span className="footer-dot">•</span>
             <span>{t('shell.rustRuntime')}</span>
           </div>
         </div>
+
+        <button
+          className="sidebar-resize-handle"
+          type="button"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t('shell.resizeSidebar')}
+          title={t('shell.resizeSidebar')}
+          aria-valuemin={SIDEBAR_WIDTH_MIN}
+          aria-valuemax={SIDEBAR_WIDTH_MAX}
+          aria-valuenow={sidebarWidth}
+          onPointerDown={handleResizeStart}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeStop}
+          onPointerCancel={handleResizeStop}
+          onDoubleClick={handleResizeReset}
+        />
       </aside>
 
       <main className="main-content">

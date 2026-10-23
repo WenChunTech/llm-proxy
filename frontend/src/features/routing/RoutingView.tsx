@@ -214,10 +214,8 @@ export function RoutingView({
                   <div className={`provider-avatar ${kind === 'grok' ? 'grok-avatar' : ''}`} style={{ backgroundColor: meta.color }}>{providerMarkText(kind)}</div>
                   <div className="priority-copy"><strong>{meta.label}</strong><span>{count ? t('routing.activeConfigs', { count }) : t('routing.noActiveConfigs')}</span></div>
                   <div className="priority-actions">
-                    <button className="icon-button subtle" type="button" title={t('routing.toTop')} disabled={index === 0} onClick={() => onMove(index, 'top')}><Icon name="toTop" size={15} /></button>
                     <button className="icon-button subtle" type="button" title={t('routing.moveUp')} disabled={index === 0} onClick={() => onMove(index, -1)}><Icon name="arrowUp" size={15} /></button>
                     <button className="icon-button subtle" type="button" title={t('routing.moveDown')} disabled={index === priority.length - 1} onClick={() => onMove(index, 1)}><Icon name="arrowDown" size={15} /></button>
-                    <button className="icon-button subtle" type="button" title={t('routing.toBottom')} disabled={index === priority.length - 1} onClick={() => onMove(index, 'bottom')}><Icon name="toBottom" size={15} /></button>
                   </div>
                 </div>
               )
@@ -259,10 +257,8 @@ export function RoutingView({
                 <span className="fallback-index">{index + 1}</span>
                 <div className="fallback-copy"><strong>{model}</strong><span>{allModels.includes(model) ? t('routing.registeredModel') : t('routing.pendingProvider')}</span></div>
                 <div className="priority-actions">
-                  <button className="icon-button subtle" type="button" title={t('routing.toTop')} disabled={index === 0} onClick={() => onMoveFallback(index, 'top')}><Icon name="toTop" size={15} /></button>
                   <button className="icon-button subtle" type="button" title={t('routing.moveUp')} disabled={index === 0} onClick={() => onMoveFallback(index, -1)}><Icon name="arrowUp" size={15} /></button>
                   <button className="icon-button subtle" type="button" title={t('routing.moveDown')} disabled={index === fallbacks.length - 1} onClick={() => onMoveFallback(index, 1)}><Icon name="arrowDown" size={15} /></button>
-                  <button className="icon-button subtle" type="button" title={t('routing.toBottom')} disabled={index === fallbacks.length - 1} onClick={() => onMoveFallback(index, 'bottom')}><Icon name="toBottom" size={15} /></button>
                   <button className="icon-button subtle danger-button" type="button" title={t('routing.removeFallback')} onClick={() => onRemoveFallback(model)}><Icon name="trash" size={15} /></button>
                 </div>
               </div>

@@ -53,7 +53,9 @@ impl LogHub {
             return;
         }
         // Normalize to one logical line for the UI (keep trailing content).
-        let line = strip_ansi(line.trim_end_matches(['\r', '\n']));
+        // ANSI color codes are preserved so the dashboard can render the
+        // original terminal highlighting.
+        let line = line.trim_end_matches(['\r', '\n']);
         if line.is_empty() {
             return;
         }
@@ -62,10 +64,10 @@ impl LogHub {
             if buffer.len() >= self.inner.capacity {
                 buffer.pop_front();
             }
-            buffer.push_back(line.clone());
+            buffer.push_back(line.to_string());
         }
         self.inner.sequence.fetch_add(1, Ordering::Relaxed);
-        let _ = self.inner.tx.send(line);
+        let _ = self.inner.tx.send(line.to_string());
     }
 
     pub fn snapshot(&self) -> Vec<String> {
@@ -127,33 +129,6 @@ impl Drop for LogLineWriter {
         let text = String::from_utf8_lossy(&self.buf).into_owned();
         self.hub.push(text);
     }
-}
-
-fn strip_ansi(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == 0x1b {
-            i += 1;
-            if i < bytes.len() && bytes[i] == b'[' {
-                i += 1;
-                while i < bytes.len() {
-                    let b = bytes[i];
-                    i += 1;
-                    if (0x40..=0x7e).contains(&b) {
-                        break;
-                    }
-                }
-                continue;
-            }
-            continue;
-        }
-        let ch = input[i..].chars().next().unwrap_or(' ');
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-    out
 }
 
 #[cfg(test)]

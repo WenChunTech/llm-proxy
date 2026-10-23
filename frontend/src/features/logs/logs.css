@@ -98,35 +98,28 @@
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.logs-scroll-actions {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  pointer-events: none;
-}
-
-.logs-scroll-button {
-  pointer-events: auto;
-  min-height: 32px;
-  padding: 0 10px;
-  box-shadow: 0 8px 20px rgba(15, 23, 32, 0.18);
-  backdrop-filter: blur(8px);
-}
-
-:root[data-theme='dark'] .logs-scroll-button {
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  white-space: pre;
 }
 
 .logs-line + .logs-line {
   margin-top: 2px;
+}
+
+/* ANSI SGR highlighting for process log lines (terminal palette on dark console). */
+.ansi-bold {
+  font-weight: 700;
+}
+
+.ansi-dim {
+  opacity: 0.6;
+}
+
+.ansi-italic {
+  font-style: italic;
+}
+
+.ansi-underline {
+  text-decoration: underline;
 }
 
 .logs-empty,

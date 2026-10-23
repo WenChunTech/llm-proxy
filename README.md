@@ -13,11 +13,11 @@
 - **Smart routing**: Model-based provider selection with configurable priority and failover chains
 - **Multi-account rotation**: Rotate API keys and OAuth credentials per provider
 - **Retry & fallback**: Automatic retries with backoff, per-model alias fallbacks, and global fallback models
-- **Embedded dashboard**: React SPA served directly from the Rust binary — manage providers, routing, and logs
-- **Real-time logs**: Live process output and request/response dumps via WebSocket
+- **Embedded dashboard**: React SPA served directly from the Rust binary — manage providers, routing, and logs; responsive down to mobile widths
+- **Real-time logs**: Live process output with original ANSI terminal colors and request/response dumps via WebSocket
 - **Auth validation**: Validate Codex/Grok auth credentials with streaming progress
 - **Config persistence**: JSON file or Upstash Redis for config storage
-- **Dark/Light theme**: System-following theme with manual override
+- **Dark/Light theme**: System-following theme with manual override; theme-aware, drag-to-resize sidebar
 - **Bilingual UI**: English/Chinese with system language detection
 
 ## Quick Start

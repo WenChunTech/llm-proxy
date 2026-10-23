@@ -53,3 +53,13 @@ export function reorderSameKindProviders(
   let cursor = 0
   return providers.map((item) => (item.kind === source.kind ? reordered[cursor++] : item))
 }
+
+export function insertBeforeSameKind<T extends { kind: string }>(providers: T[], item: T): T[] {
+  const firstSameKindIndex = providers.findIndex((existing) => existing.kind === item.kind)
+  if (firstSameKindIndex < 0) return [...providers, item]
+  return [
+    ...providers.slice(0, firstSameKindIndex),
+    item,
+    ...providers.slice(firstSameKindIndex),
+  ]
+}

@@ -58,7 +58,7 @@ function App() {
     }
     const kind = preferredKind && defaultPriority.includes(preferredKind)
       ? preferredKind
-      : 'openai_chat'
+      : defaultPriority[0]
     setEditingId(null)
     setEditingProvider({
       kind,

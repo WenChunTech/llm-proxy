@@ -566,7 +566,6 @@ export function LogsView({
           lines={processLines}
           filter={processFilter}
           autoScroll={autoScroll}
-          onAutoScrollChange={setAutoScroll}
         />
       ) : (
         <LoggingSettings

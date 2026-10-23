@@ -351,9 +351,9 @@ async fn handle_logs_socket(
         return;
     }
 
-    // Replay recent process log lines as structured messages (ANSI stripped).
+    // Replay recent process log lines (ANSI kept for the original highlighting).
     for line in log_hub.snapshot() {
-        let payload = json!({ "type": "log", "line": strip_ansi(&line) });
+        let payload = json!({ "type": "log", "line": line });
         if send_json(&mut ws, &payload).await.is_err() {
             return;
         }
@@ -371,7 +371,7 @@ async fn handle_logs_socket(
             line = log_rx.recv() => {
                 match line {
                     Ok(text) => {
-                        let payload = json!({ "type": "log", "line": strip_ansi(&text) });
+                        let payload = json!({ "type": "log", "line": text });
                         if send_json(&mut ws, &payload).await.is_err() {
                             break;
                         }
@@ -900,12 +900,7 @@ pub(in crate::app) async fn api_logs_snapshot(depot: &mut Depot, res: &mut Respo
         render_error(res, ProxyError::Config("missing app state".to_string()));
         return;
     };
-    let lines: Vec<String> = state
-        .log_hub
-        .snapshot()
-        .into_iter()
-        .map(|line| strip_ansi(&line))
-        .collect();
+    let lines: Vec<String> = state.log_hub.snapshot().into_iter().collect();
     res.render(Json(json!({
         "lines": lines,
         "count": lines.len(),

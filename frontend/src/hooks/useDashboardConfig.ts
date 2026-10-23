@@ -18,7 +18,7 @@ import {
   providersFromImport,
   toApiProvider,
 } from '../lib/configImportExport'
-import { moveItemByAction, reorderItem, reorderSameKindProviders } from '../lib/list'
+import { insertBeforeSameKind, moveItemByAction, reorderItem, reorderSameKindProviders } from '../lib/list'
 import type { ListMoveAction } from '../lib/list'
 import {
   persistAccessKey,
@@ -369,7 +369,10 @@ export function useDashboardConfig(setToast: (message: string) => void) {
       ? providers.map((provider) =>
           provider.id === editingId ? { ...editingProvider, id: editingId } : provider,
         )
-      : [...providers, { ...editingProvider, id: `${editingProvider.kind}:${Date.now()}` }]
+      : insertBeforeSameKind(providers, {
+          ...editingProvider,
+          id: `${editingProvider.kind}:${Date.now()}`,
+        })
     setProviders(nextProviders)
     snapshotRef.current = { ...snapshotRef.current, providers: nextProviders }
     void persistConfig({ providers: nextProviders })

@@ -99,15 +99,6 @@ export function ProviderCard({
           <button
             className="icon-button subtle"
             type="button"
-            title={t('card.toTop')}
-            disabled={!canReorder || priorityIndex === 0}
-            onClick={() => onMove?.('top')}
-          >
-            <Icon name="toTop" size={15} />
-          </button>
-          <button
-            className="icon-button subtle"
-            type="button"
             title={t('card.raise')}
             disabled={!canReorder || priorityIndex === 0}
             onClick={() => onMove?.(-1)}
@@ -122,15 +113,6 @@ export function ProviderCard({
             onClick={() => onMove?.(1)}
           >
             <Icon name="arrowDown" size={15} />
-          </button>
-          <button
-            className="icon-button subtle"
-            type="button"
-            title={t('card.toBottom')}
-            disabled={!canReorder || priorityIndex >= priorityTotal - 1}
-            onClick={() => onMove?.('bottom')}
-          >
-            <Icon name="toBottom" size={15} />
           </button>
         </div>
       </div>
