@@ -2,14 +2,17 @@ use llm_proxy::config::{
     BaseProviderConfig, CodexConfig, OneOrMany, OpenAiChatConfig, OpenAiResponsesConfig,
     ProviderConfig,
 };
+use llm_proxy::error::ProxyError;
 use llm_proxy::provider::credentials::{
     coverage_attempt_budget, credential_slot_count, provider_test_slot_count,
 };
 use llm_proxy::provider::executor::{
-    clean_image_base_url, image_provider_config, rotate_attempt_targets, should_attempt,
+    clean_image_base_url, image_provider_config, prepare_targets, rotate_attempt_targets,
+    should_attempt,
 };
 use llm_proxy::provider::types::{AttemptTarget, ProviderType};
 use llm_proxy::state::ProviderCursor;
+use serde_json::json;
 
 #[test]
 fn rotate_attempt_targets_starts_with_provider_cursor() {
@@ -245,4 +248,78 @@ fn target_order(targets: &[AttemptTarget]) -> Vec<(ProviderType, usize)> {
         .iter()
         .map(|target| (target.provider_type, target.config_index))
         .collect()
+}
+
+#[test]
+fn prepare_targets_converts_once_per_provider_type() {
+    let targets = vec![
+        target(ProviderType::Chat, 0),
+        target(ProviderType::Chat, 1),
+        target(ProviderType::Responses, 0),
+    ];
+    let body = json!({ "model": "m", "messages": [] });
+    let mut conversions = Vec::new();
+    let prepared = prepare_targets(targets, "m", &body, |provider_type, body| {
+        conversions.push(provider_type);
+        Ok(body)
+    });
+
+    assert_eq!(
+        conversions,
+        vec![ProviderType::Chat, ProviderType::Responses]
+    );
+    assert_eq!(prepared.targets.len(), 3);
+    assert_eq!(prepared.prepared.len(), 2);
+    assert!(prepared.dropped.is_empty());
+    assert!(prepared.first_error.is_none());
+}
+
+#[test]
+fn prepare_targets_drops_targets_whose_conversion_fails() {
+    let targets = vec![
+        target_with_base_url(ProviderType::Responses, 1, "https://a.example/v1"),
+        target_with_base_url(ProviderType::Responses, 3, "https://b.example/v1"),
+        target(ProviderType::Chat, 5),
+    ];
+    let body = json!({ "model": "m" });
+    let prepared = prepare_targets(targets, "m", &body, |provider_type, _| {
+        if provider_type == ProviderType::Responses {
+            Err(ProxyError::InvalidRequest("schema mismatch".to_string()))
+        } else {
+            Ok(json!({ "converted": true }))
+        }
+    });
+
+    assert_eq!(prepared.targets.len(), 1);
+    assert_eq!(prepared.targets[0].provider_type, ProviderType::Chat);
+    assert_eq!(prepared.dropped.len(), 2);
+    assert!(
+        prepared
+            .dropped
+            .iter()
+            .all(|record| record.provider_type == ProviderType::Responses)
+    );
+    assert_eq!(prepared.dropped[0].config_index, 1);
+    assert_eq!(prepared.dropped[1].config_index, 3);
+    assert!(prepared.dropped.iter().all(|record| record.error.is_some()));
+    assert!(prepared.first_error.is_some());
+}
+
+#[test]
+fn prepare_targets_reports_first_error_when_every_conversion_fails() {
+    let targets = vec![
+        target(ProviderType::Chat, 0),
+        target(ProviderType::Responses, 1),
+    ];
+    let body = json!({ "model": "m" });
+    let prepared = prepare_targets(targets, "m", &body, |_, _| {
+        Err(ProxyError::InvalidRequest(
+            "request body must be a JSON object".to_string(),
+        ))
+    });
+
+    assert!(prepared.targets.is_empty());
+    assert!(prepared.prepared.is_empty());
+    assert_eq!(prepared.dropped.len(), 2);
+    assert!(prepared.first_error.is_some());
 }

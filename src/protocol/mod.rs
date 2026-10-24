@@ -36,6 +36,21 @@ pub fn convert_request(
     }
     ensure_supported(source, target, ConversionKind::Request)?;
 
+    convert_request_body(body, source, target).map_err(|error| match error {
+        // The client body fails to deserialize into its own protocol model:
+        // a client-side problem, not a proxy failure.
+        ProxyError::Json(json) => ProxyError::InvalidRequest(format!(
+            "request body does not match {source:?} protocol schema: {json}"
+        )),
+        error => error,
+    })
+}
+
+fn convert_request_body(
+    body: Value,
+    source: ProviderType,
+    target: ProviderType,
+) -> Result<Value, ProxyError> {
     match (source, target) {
         (ProviderType::Chat, ProviderType::Responses) => {
             map::<openai::chat::Request, openai::responses::Request>(body)

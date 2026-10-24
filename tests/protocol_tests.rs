@@ -225,3 +225,28 @@ fn grok_identity_conversion_is_passthrough() {
         convert_request(body.clone(), ProviderType::Grok, ProviderType::Grok).expect("identity");
     assert_eq!(out, body);
 }
+
+#[test]
+fn convert_request_maps_client_schema_errors_to_invalid_request() {
+    // A Claude request whose message content is neither a string nor a list of
+    // content blocks fails typed deserialization. That is a client error and
+    // must surface as InvalidRequest (400), not a proxy failure (500).
+    let body = json!({
+        "model": "claude-sonnet",
+        "max_tokens": 16,
+        "messages": [{ "role": "user", "content": 42 }]
+    });
+
+    let error = convert_request(body, ProviderType::Claude, ProviderType::Responses)
+        .expect_err("schema mismatch must fail");
+
+    assert!(matches!(
+        error,
+        llm_proxy::error::ProxyError::InvalidRequest(_)
+    ));
+    assert!(
+        error.to_string().contains("protocol schema"),
+        "error must name the source protocol schema: {error}"
+    );
+    assert_eq!(error.status_code(), salvo::http::StatusCode::BAD_REQUEST);
+}

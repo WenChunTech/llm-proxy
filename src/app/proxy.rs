@@ -168,11 +168,14 @@ async fn handle_model_request(
                 render_error(res, error);
             }
         }
-        Err(error) => {
+        Err(failure) => {
             if let Some(session) = dump.as_ref() {
-                session.write_error(&error.to_string());
+                if !failure.attempt_history.is_empty() {
+                    session.write_attempt_history(&failure.attempt_history);
+                }
+                session.write_error(&failure.error.to_string());
             }
-            render_error(res, error);
+            render_error(res, failure.error);
         }
     }
 }

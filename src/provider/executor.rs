@@ -40,7 +40,8 @@ pub struct ExecuteResult {
     /// or for passthrough/image requests.
     pub converted_request: Option<Value>,
     /// Records of every provider attempt (including the final one),
-    /// useful for debug dumps when all providers fail.
+    /// populated by `execute` on both success and failure so debug dumps
+    /// show the full fallback story.
     pub attempt_history: Vec<AttemptRecord>,
 }
 
@@ -58,6 +59,22 @@ pub struct AttemptRecord {
     pub error: Option<String>,
 }
 
+/// Failure outcome of [`execute`]: the final error plus every recorded
+/// provider attempt, so callers can persist the full history even when no
+/// attempt ever produced an HTTP response (e.g. request conversion failures).
+#[derive(Debug)]
+pub struct ExecuteFailure {
+    pub error: ProxyError,
+    pub attempt_history: Vec<AttemptRecord>,
+}
+
+/// What one model in the fallback chain contributed to the overall attempt.
+#[derive(Debug, Default)]
+struct ModelOutcome {
+    result: Option<ExecuteResult>,
+    attempt_history: Vec<AttemptRecord>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ExecuteImageRequest {
     pub model: String,
@@ -69,17 +86,24 @@ pub async fn execute(
     state: &AppState,
     snapshot: &AppSnapshot,
     request: ExecuteRequest,
-) -> Result<ExecuteResult, ProxyError> {
+) -> Result<ExecuteResult, ExecuteFailure> {
     let request = Arc::new(request);
-    let models = models_to_try(&request.model, &snapshot.config)?;
+    let models =
+        models_to_try(&request.model, &snapshot.config).map_err(|error| ExecuteFailure {
+            error,
+            attempt_history: Vec::new(),
+        })?;
 
     if !models
         .iter()
         .any(|model| snapshot.registry.has_any_provider_for_model(model))
     {
-        return Err(ProxyError::ModelNotConfigured {
-            model: request.model.clone(),
-            attempted: models,
+        return Err(ExecuteFailure {
+            error: ProxyError::ModelNotConfigured {
+                model: request.model.clone(),
+                attempted: models,
+            },
+            attempt_history: Vec::new(),
         });
     }
 
@@ -112,26 +136,31 @@ pub async fn execute(
 
         // Each model gets an independent attempt budget so fallback models are not
         // starved after the primary model exhausts its coverage/max_retries.
-        if let Some(mut result) =
-            execute_single_model(state, snapshot, &request, model, &mut last_error).await?
-        {
+        let mut outcome = execute_single_model(state, snapshot, &request, model, &mut last_error)
+            .await
+            .map_err(|error| ExecuteFailure {
+                error,
+                attempt_history: attempt_history.clone(),
+            })?;
+        attempt_history.append(&mut outcome.attempt_history);
+        if let Some(result) = outcome.result {
             if result.response.is_success() {
+                let mut result = result;
+                result.attempt_history = attempt_history;
                 return Ok(result);
             }
-            attempt_history.append(&mut result.attempt_history);
             last_result = Some(result);
         }
     }
 
-    if let Some(result) = last_result {
-        let mut result = result;
+    if let Some(mut result) = last_result {
         result.attempt_history = attempt_history;
         return Ok(result);
     }
-    if let Some(error) = last_error {
-        return Err(error);
-    }
-    Err(ProxyError::AllProvidersExhausted)
+    Err(ExecuteFailure {
+        error: last_error.unwrap_or(ProxyError::AllProvidersExhausted),
+        attempt_history,
+    })
 }
 
 pub async fn execute_image(
@@ -329,34 +358,137 @@ where
     })
 }
 
+/// Result of converting the client request once per distinct provider type.
+pub struct PreparedTargets {
+    /// Targets that can proceed, each provider type sharing one converted body.
+    pub targets: Vec<AttemptTarget>,
+    /// Converted request body per provider type, ready for `send_request`.
+    pub prepared: HashMap<ProviderType, Value>,
+    /// One record per dropped target so failed conversions stay observable.
+    pub dropped: Vec<AttemptRecord>,
+    /// First conversion error, for reporting when every target was dropped.
+    pub first_error: Option<ProxyError>,
+}
+
+/// Convert the request once per distinct provider type before attempts begin.
+///
+/// Request preparation is a pure function of (provider type, body), so a
+/// conversion failure is deterministic: retrying the same provider type on
+/// another config or credential slot, with backoff, cannot succeed. Targets
+/// whose conversion fails are dropped (one attempt record each) so the retry
+/// budget is only spent on attempts that can actually reach upstream.
+pub fn prepare_targets(
+    targets: Vec<AttemptTarget>,
+    model: &str,
+    body: &Value,
+    mut convert: impl FnMut(ProviderType, Value) -> Result<Value, ProxyError>,
+) -> PreparedTargets {
+    let mut prepared: HashMap<ProviderType, Value> = HashMap::new();
+    let mut kept = Vec::with_capacity(targets.len());
+    let mut dropped = Vec::new();
+    let mut first_error: Option<ProxyError> = None;
+
+    for target in targets {
+        if prepared.contains_key(&target.provider_type) {
+            kept.push(target);
+            continue;
+        }
+        let converted = request_with_model(body.clone(), model)
+            .and_then(|body| convert(target.provider_type, body));
+        match converted {
+            Ok(converted) => {
+                prepared.insert(target.provider_type, converted);
+                kept.push(target);
+            }
+            Err(error) => {
+                tracing::debug!(
+                    model = %model,
+                    provider = ?target.provider_type,
+                    raw_request_body = %body,
+                    error = %error,
+                    "request conversion failed"
+                );
+                let message = error.to_string();
+                tracing::warn!(
+                    model = %model,
+                    provider = ?target.provider_type,
+                    provider_index = target.provider_index,
+                    config_index = target.config_index,
+                    base_url = config_base_url(&target.config),
+                    error = %message,
+                    "provider target skipped: request conversion cannot succeed"
+                );
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+                dropped.push(AttemptRecord {
+                    provider_type: target.provider_type,
+                    provider_index: target.provider_index,
+                    config_index: target.config_index,
+                    base_url: Some(config_base_url(&target.config).to_string()),
+                    status: None,
+                    response_body: None,
+                    error: Some(message),
+                });
+            }
+        }
+    }
+
+    PreparedTargets {
+        targets: kept,
+        prepared,
+        dropped,
+        first_error,
+    }
+}
+
 async fn execute_single_model(
     state: &AppState,
     snapshot: &AppSnapshot,
     request: &Arc<ExecuteRequest>,
     model: &str,
     last_error: &mut Option<ProxyError>,
-) -> Result<Option<ExecuteResult>, ProxyError> {
+) -> Result<ModelOutcome, ProxyError> {
     let mut targets = snapshot.registry.attempt_targets(model);
     rotate_attempt_targets(&mut targets, state.provider_cursor(model).await);
+
+    let prepared_targets = prepare_targets(targets, model, &request.body, |provider_type, body| {
+        state
+            .providers
+            .prepare_request(provider_type, body, request.target, request.is_streaming)
+    });
+    if prepared_targets.targets.is_empty() {
+        // Every candidate provider type failed conversion on the client body;
+        // retrying cannot help, so move on to the next model in the chain.
+        if let Some(error) = prepared_targets.first_error {
+            *last_error = Some(error);
+        }
+        return Ok(ModelOutcome {
+            result: None,
+            attempt_history: prepared_targets.dropped,
+        });
+    }
+    let prepared = prepared_targets.prepared;
+    let preflight_history = prepared_targets.dropped;
     let mut retry_budget = 0usize;
 
     match run_provider_attempts(
         model,
         snapshot.config.retry.max_retries,
         &snapshot.config,
-        &targets,
+        &prepared_targets.targets,
         &mut retry_budget,
         "model",
         |target, target_attempt| {
             let request = Arc::clone(request);
             let model = model.to_string();
             let target = target.clone();
+            let provider_request = prepared.get(&target.provider_type).cloned();
             async move {
-                let auth_key = auth_cursor_key(&target);
-                let auth_start_index = if let Some(key) = auth_key.as_ref() {
-                    state.auth_cursor(key).await
-                } else {
-                    None
+                let Some(provider_request) = provider_request else {
+                    return Err(ProxyError::Config(format!(
+                        "no prepared request for provider {target:?}"
+                    )));
                 };
                 let result = try_target(
                     &state.providers,
@@ -364,15 +496,15 @@ async fn execute_single_model(
                     &request,
                     &model,
                     &target,
-                    auth_start_index,
                     target_attempt,
+                    provider_request,
                 )
                 .await?;
                 if result.response.is_success() {
                     state
                         .record_provider_success(&model, provider_cursor(&target))
                         .await;
-                    if let Some(key) = auth_key {
+                    if let Some(key) = auth_cursor_key(&target) {
                         match result.response.auth_index() {
                             Some(auth_index) => {
                                 state.record_auth_success(key, auth_index).await;
@@ -390,21 +522,24 @@ async fn execute_single_model(
     )
     .await?
     {
-        AttemptLoopResult::Success(result) => Ok(Some(result)),
+        AttemptLoopResult::Success(result) => Ok(ModelOutcome {
+            result: Some(result),
+            attempt_history: preflight_history,
+        }),
         AttemptLoopResult::Exhausted {
             last_result,
             last_error: exhausted_error,
-            attempt_history,
+            attempt_history: attempt_records,
         } => {
             if let Some(error) = exhausted_error {
                 *last_error = Some(error);
             }
-            if let Some(mut result) = last_result {
-                result.attempt_history = attempt_history;
-                Ok(Some(result))
-            } else {
-                Ok(None)
-            }
+            let mut attempt_history = preflight_history;
+            attempt_history.extend(attempt_records);
+            Ok(ModelOutcome {
+                result: last_result,
+                attempt_history,
+            })
         }
     }
 }
@@ -415,43 +550,15 @@ async fn try_target(
     request: &ExecuteRequest,
     model: &str,
     target: &AttemptTarget,
-    auth_start_index: Option<usize>,
     target_attempt: usize,
+    provider_request: Value,
 ) -> Result<ExecuteResult, ProxyError> {
-    let body = request_with_model((*request.body).clone(), model).map_err(|error| {
-        tracing::debug!(
-            model = %model,
-            provider = ?target.provider_type,
-            provider_index = target.provider_index,
-            config_index = target.config_index,
-            base_url = config_base_url(&target.config),
-            error = %error,
-            raw_request_body = %request.body.as_ref(),
-            "request body normalization failed"
-        );
-        error
-    })?;
-    let provider_request = providers
-        .prepare_request(
-            target.provider_type,
-            body,
-            request.target,
-            request.is_streaming,
-        )
-        .map_err(|error| {
-            tracing::debug!(
-                source_provider = ?request.target,
-                target_provider = ?target.provider_type,
-                model = %model,
-                provider_index = target.provider_index,
-                config_index = target.config_index,
-                base_url = config_base_url(&target.config),
-                error = %error,
-                raw_request_body = %request.body.as_ref(),
-                "request conversion failed"
-            );
-            error
-        })?;
+    let auth_key = auth_cursor_key(target);
+    let auth_start_index = if let Some(key) = auth_key.as_ref() {
+        state.auth_cursor(key).await
+    } else {
+        None
+    };
     let converted_request = if target.provider_type != request.target {
         Some(provider_request.clone())
     } else {

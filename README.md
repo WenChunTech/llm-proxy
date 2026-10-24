@@ -170,6 +170,18 @@ frontend/              # React 19 + TypeScript + Vite SPA
 4. Provider failure triggers retry / fallback / next credential slot
 5. SSE fully parsed and converted between protocols
 
+Notes on failure handling:
+
+- A body that is not valid JSON, or that fails protocol schema validation, is
+  rejected immediately with `400 invalid_request` — provider retries,
+  model aliases, and fallback models are not exercised for it.
+- Request conversion runs once per provider protocol before attempts begin;
+  providers whose conversion deterministically fails are skipped without
+  consuming retry budget or backoff time (each is still recorded in the debug
+  dump attempt history).
+- The debug dump attempt history also includes earlier failed models when a
+  fallback model eventually succeeds.
+
 ## Docker
 
 The Dockerfile packages a prebuilt binary. Build on the host first:
