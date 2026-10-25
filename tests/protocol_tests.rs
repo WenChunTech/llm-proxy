@@ -77,7 +77,7 @@ fn grok_request_conversions_from_core_protocols() {
         convert_request(claude, ProviderType::Claude, ProviderType::Grok).expect("claude->grok");
     assert_object(&out);
 
-    // Gemini -> Grok (routed through gemini_cli)
+    // Gemini -> Grok (direct gemini-primary conversion)
     let gemini = json!({
         "model": "grok-4.5",
         "contents": [{"role": "user", "parts": [{"text": "hi"}]}]

@@ -1,9 +1,9 @@
 use converter::{
     convert::{
-        ChatStreamWrapper, ClaudeStreamWrapper, GeminiCliStreamWrapper, GrokStreamWrapper,
+        ChatStreamWrapper, ClaudeStreamWrapper, GeminiStreamWrapper, GrokStreamWrapper,
         ResponsesStreamWrapper, StreamState,
     },
-    models::{claude, gemini, gemini_cli, grok, openai},
+    models::{claude, gemini, grok, openai},
 };
 use serde_json::Value;
 
@@ -117,11 +117,9 @@ impl ProtocolStreamConverter {
                     chunk,
                     state: self.take_state(),
                 };
-                let converted: converter::convert::GeminiCliStreamsWrapper = wrapper.into();
+                let converted: converter::convert::GeminiStreamsWrapper = wrapper.into();
                 self.state = converted.state;
-                let chunks: Vec<gemini::Response> =
-                    converted.chunks.into_iter().map(Into::into).collect();
-                values_to_events(chunks)
+                values_to_events(converted.chunks)
             }
             ProviderType::Grok => {
                 let wrapper = ChatStreamWrapper {
@@ -163,11 +161,9 @@ impl ProtocolStreamConverter {
                     chunk,
                     state: self.take_state(),
                 };
-                let converted: converter::convert::GeminiCliStreamsWrapper = wrapper.into();
+                let converted: converter::convert::GeminiStreamsWrapper = wrapper.into();
                 self.state = converted.state;
-                let chunks: Vec<gemini::Response> =
-                    converted.chunks.into_iter().map(Into::into).collect();
-                values_to_events(chunks)
+                values_to_events(converted.chunks)
             }
             ProviderType::Responses => Ok(Vec::new()),
             ProviderType::Grok => {
@@ -205,11 +201,9 @@ impl ProtocolStreamConverter {
                     chunk,
                     state: self.take_state(),
                 };
-                let converted: converter::convert::GeminiCliStreamsWrapper = wrapper.into();
+                let converted: converter::convert::GeminiStreamsWrapper = wrapper.into();
                 self.state = converted.state;
-                let chunks: Vec<gemini::Response> =
-                    converted.chunks.into_iter().map(Into::into).collect();
-                values_to_events(chunks)
+                values_to_events(converted.chunks)
             }
             ProviderType::Claude => Ok(Vec::new()),
             ProviderType::Grok => {
@@ -227,10 +221,9 @@ impl ProtocolStreamConverter {
 
     fn convert_gemini(&mut self, data: Value) -> Result<Vec<OutboundSseEvent>, ProxyError> {
         let chunk: gemini::Response = serde_json::from_value(data)?;
-        let chunk: gemini_cli::Response = chunk.into();
         match self.target {
             ProviderType::Chat => {
-                let wrapper = GeminiCliStreamWrapper {
+                let wrapper = GeminiStreamWrapper {
                     chunk,
                     state: self.take_state(),
                 };
@@ -239,7 +232,7 @@ impl ProtocolStreamConverter {
                 values_to_events(converted.chunks)
             }
             ProviderType::Responses => {
-                let wrapper = GeminiCliStreamWrapper {
+                let wrapper = GeminiStreamWrapper {
                     chunk,
                     state: self.take_state(),
                 };
@@ -248,7 +241,7 @@ impl ProtocolStreamConverter {
                 values_to_events(converted.chunks)
             }
             ProviderType::Claude => {
-                let wrapper = GeminiCliStreamWrapper {
+                let wrapper = GeminiStreamWrapper {
                     chunk,
                     state: self.take_state(),
                 };
@@ -258,7 +251,7 @@ impl ProtocolStreamConverter {
             }
             ProviderType::Gemini => Ok(Vec::new()),
             ProviderType::Grok => {
-                let wrapper = GeminiCliStreamWrapper {
+                let wrapper = GeminiStreamWrapper {
                     chunk,
                     state: self.take_state(),
                 };
@@ -296,11 +289,9 @@ impl ProtocolStreamConverter {
                     chunk,
                     state: self.take_state(),
                 };
-                let converted: converter::convert::GeminiCliStreamsWrapper = wrapper.into();
+                let converted: converter::convert::GeminiStreamsWrapper = wrapper.into();
                 self.state = converted.state;
-                let chunks: Vec<gemini::Response> =
-                    converted.chunks.into_iter().map(Into::into).collect();
-                values_to_events(chunks)
+                values_to_events(converted.chunks)
             }
             ProviderType::Responses => {
                 // Grok stream events map 1:1 onto OpenAI Responses events.
@@ -332,10 +323,10 @@ fn initial_state(
             }
         }
         (ProviderType::Chat, ProviderType::Claude) => StreamState::chat_to_claude(),
-        (ProviderType::Chat, ProviderType::Gemini) => StreamState::chat_to_gemini_cli(),
+        (ProviderType::Chat, ProviderType::Gemini) => StreamState::chat_to_gemini(),
         (ProviderType::Responses, ProviderType::Chat) => StreamState::responses_to_chat(),
         (ProviderType::Responses, ProviderType::Claude) => StreamState::responses_to_claude(),
-        (ProviderType::Responses, ProviderType::Gemini) => StreamState::responses_to_gemini_cli(),
+        (ProviderType::Responses, ProviderType::Gemini) => StreamState::responses_to_gemini(),
         (ProviderType::Claude, ProviderType::Chat) => StreamState::claude_to_chat(),
         (ProviderType::Claude, ProviderType::Responses) => {
             let state = StreamState::claude_to_responses();
@@ -345,21 +336,21 @@ fn initial_state(
                 state
             }
         }
-        (ProviderType::Claude, ProviderType::Gemini) => StreamState::claude_to_gemini_cli(),
-        (ProviderType::Gemini, ProviderType::Chat) => StreamState::gemini_cli_to_chat(),
+        (ProviderType::Claude, ProviderType::Gemini) => StreamState::claude_to_gemini(),
+        (ProviderType::Gemini, ProviderType::Chat) => StreamState::gemini_to_chat(),
         (ProviderType::Gemini, ProviderType::Responses) => {
-            let state = StreamState::gemini_cli_to_responses();
+            let state = StreamState::gemini_to_responses();
             if let Some(request) = context.responses_request {
-                state.with_gemini_cli_request(request)
+                state.with_gemini_request(request)
             } else {
                 state
             }
         }
-        (ProviderType::Gemini, ProviderType::Claude) => StreamState::gemini_cli_to_claude(),
+        (ProviderType::Gemini, ProviderType::Claude) => StreamState::gemini_to_claude(),
         // Grok as upstream source: native Grok stream events -> client protocol.
         (ProviderType::Grok, ProviderType::Chat) => StreamState::grok_to_chat(),
         (ProviderType::Grok, ProviderType::Claude) => StreamState::grok_to_claude(),
-        (ProviderType::Grok, ProviderType::Gemini) => StreamState::grok_to_gemini_cli(),
+        (ProviderType::Grok, ProviderType::Gemini) => StreamState::grok_to_gemini(),
         (ProviderType::Grok, ProviderType::Responses) => StreamState::grok_to_responses(),
         // Client protocol -> Grok upstream: seed the source-derived request when available.
         (ProviderType::Chat, ProviderType::Grok) => {
@@ -379,9 +370,9 @@ fn initial_state(
             }
         }
         (ProviderType::Gemini, ProviderType::Grok) => {
-            let state = StreamState::gemini_cli_to_grok();
+            let state = StreamState::gemini_to_grok();
             if let Some(request) = context.grok_request {
-                state.with_gemini_cli_grok_request(request)
+                state.with_gemini_grok_request(request)
             } else {
                 state
             }
